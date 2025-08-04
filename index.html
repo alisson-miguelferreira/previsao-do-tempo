@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Previsão do Tempo</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Previsão do Tempo</h1>
+        
+        <!-- Área de busca -->
+        <div class="search-box">
+            <input 
+                type="text" 
+                id="cityInput" 
+                placeholder="Digite o nome da cidade..."
+                class="search-input"
+            >
+            <button onclick="searchWeather()" class="search-button">Buscar</button>
+        </div>
+
+
+        <!-- Tempo atual -->
+        <div id="currentWeather" class="weather-card hidden">
+            <h2 id="cityName"></h2>
+            <div class="weather-main">
+                <img id="weatherIcon" src="" alt="Ícone do tempo">
+                <div class="temperature">
+                    <span id="temperature"></span>
+                </div>
+            </div>
+            <p id="description" class="description"></p>
+            <div class="weather-details">
+                <div class="detail">
+                    <span class="label">Sensação Térmica</span>
+                    <span id="feelsLike"></span>
+                </div>
+                <div class="detail">
+                    <span class="label">Umidade</span>
+                    <span id="humidity"></span>
+                </div>
+                <div class="detail">
+                    <span class="label">Vento</span>
+                    <span id="windSpeed"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Previsão dos próximos dias -->
+        <div id="forecast" class="forecast hidden">
+            <h3>Próximos 5 dias</h3>
+            <div id="forecastCards" class="forecast-cards"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
