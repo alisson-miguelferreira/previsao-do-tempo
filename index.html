@@ -1,60 +1,109 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Previsão do Tempo</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>TempNow - Previsão do Tempo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=ocean3-contrast">
 </head>
+
 <body>
-    <div class="container">
-        <h1>Previsão do Tempo</h1>
-        
-        <!-- Área de busca -->
-        <div class="search-box">
-            <input 
-                type="text" 
-                id="cityInput" 
-                placeholder="Digite o nome da cidade..."
-                class="search-input"
-            >
-            <button onclick="searchWeather()" class="search-button">Buscar</button>
-        </div>
+    <div class="bg-animation"></div>
+    <div class="bg-orbs">
+        <div class="orb"></div>
+        <div class="orb"></div>
+        <div class="orb"></div>
+    </div>
 
+    <div class="app-container">
+        <div class="main-container">
+            <header class="app-header">
+                <h1 class="app-title">TempNow</h1>
+                <p class="app-subtitle">Previsão do tempo inteligente e precisa</p>
+            </header>
 
-        <!-- Tempo atual -->
-        <div id="currentWeather" class="weather-card hidden">
-            <h2 id="cityName"></h2>
-            <div class="weather-main">
-                <img id="weatherIcon" src="" alt="Ícone do tempo">
-                <div class="temperature">
-                    <span id="temperature"></span>
+            <section class="search-section">
+                <div class="search-container">
+                    <div class="input-container">
+                        <label for="cityInput" class="visually-hidden">Cidade</label>
+                        <input type="text" id="cityInput" class="search-input" placeholder="Digite o nome da cidade..."
+                            aria-label="Nome da cidade" autocomplete="off">
+                        <ul id="suggestions" class="suggestions-list hidden" role="listbox"
+                            aria-label="Sugestões de cidades"></ul>
+                    </div>
+                    <div class="controls">
+                        <button id="unitToggle" class="unit-toggle" aria-pressed="false"
+                            title="Alternar °C/°F">°C</button>
+                        <button id="searchButton" class="search-btn">Buscar</button>
+                        <button id="locateButton" class="locate-btn" title="Usar minha localização"
+                            aria-label="Usar minha localização">
+                            <!-- SVG location pin + pulse -->
+                            <svg class="locate-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <path d="M12 2C8.686 2 6 4.686 6 8c0 5.25 6 12 6 12s6-6.75 6-12c0-3.314-2.686-6-6-6z"
+                                    fill="currentColor" opacity="0.95" />
+                                <circle cx="12" cy="8" r="2.2" fill="#fff" />
+                            </svg>
+                            <span class="locate-label">Minha localização</span>
+                        </button>
+                    </div>
                 </div>
-            </div>
-            <p id="description" class="description"></p>
-            <div class="weather-details">
-                <div class="detail">
-                    <span class="label">Sensação Térmica</span>
-                    <span id="feelsLike"></span>
-                </div>
-                <div class="detail">
-                    <span class="label">Umidade</span>
-                    <span id="humidity"></span>
-                </div>
-                <div class="detail">
-                    <span class="label">Vento</span>
-                    <span id="windSpeed"></span>
-                </div>
-            </div>
-        </div>
 
-        <!-- Previsão dos próximos dias -->
-        <div id="forecast" class="forecast hidden">
-            <h3>Próximos 5 dias</h3>
-            <div id="forecastCards" class="forecast-cards"></div>
+                <div id="error" class="error-message hidden" role="alert" aria-live="assertive"></div>
+
+                <div id="loading" class="loading hidden" aria-hidden="true">
+                    <div class="loading-spinner" aria-hidden="true"></div>
+                </div>
+            </section>
+
+            <section id="favoritesSection" class="hidden">
+                <h3 class="forecast-title">Favoritos</h3>
+                <div id="favoritesList" class="forecast-grid"></div>
+            </section>
+
+            <main>
+                <!-- Current Weather -->
+                <section id="currentWeather" class="weather-card hidden">
+                    <h2 id="cityName" class="city-name"></h2>
+                    <!-- condition icon (colored by condition) -->
+                    <div id="weatherVisual" class="weather-visual" aria-hidden="true"></div>
+
+                    <div class="current-weather">
+                        <img id="weatherIcon" class="weather-icon" src="" alt="Ícone do tempo">
+                        <div class="temperature-display" id="temperature"></div>
+                    </div>
+                    <p id="description" class="weather-description"></p>
+                    <div class="weather-details">
+                        <div class="detail-card">
+                            <div class="detail-label">Sensação Térmica</div>
+                            <div class="detail-value" id="feelsLike"></div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-label">Umidade</div>
+                            <div class="detail-value" id="humidity"></div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-label">Vento</div>
+                            <div class="detail-value" id="windSpeed"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Forecast -->
+                <section id="forecast" class="forecast-section hidden">
+                    <h3 class="forecast-title">Próximos 5 dias</h3>
+                    <div id="forecastCards" class="forecast-grid"></div>
+                </section>
+            </main>
         </div>
     </div>
 
     <script src="script.js"></script>
 </body>
+
 </html>
