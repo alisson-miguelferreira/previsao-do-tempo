@@ -1,544 +1,1331 @@
-/*
- * script.js
- * Lógica principal do frontend para o app de previsão do tempo:
- * - busca geocoding, tempo atual e previsão na API OpenWeather
- * - renderiza sugestões, cartão do tempo atual, previsão e favoritos
- * - gerencia estado da UI (carregamento, erros, unidades)
- * - mapeia condições meteorológicas para ícones SVG coloridos
- * Observação: a chave de API está embutida no cliente (recomenda-se mover para um proxy no servidor).
- */
+// ========== CONFIGURAÇÃO E VARIÁVEIS GLOBAIS ==========
 const API_KEY = 'f7fc4ccec2e0cc8d47fa3f418178de34';
+let currentUnit = 'metric';
+let favorites = JSON.parse(localStorage.getItem('weatherFavorites')) || [];
+let currentCityData = null;
 
-// Estado e configurações atuais
-// `unit` controla 'metric' vs 'imperial'. `selectedLocation` guarda o último local selecionado.
-// Estrutura de selectedLocation: { name, lat, lon, state, country }
-let unit = 'metric';
-let selectedLocation = null;
+// ========== ELEMENTOS DO DOM ==========
+const DOM = {
+    // Inputs e controles
+    cityInput: document.getElementById('cityInput'),
+    searchBtn: document.getElementById('searchBtn'),
+    locationBtn: document.getElementById('locationBtn'),
+    unitToggle: document.getElementById('unitToggle'),
 
-// Exibe uma mensagem de erro persistente na UI (role=alert)
-// Entrada: msg (string) - texto a ser exibido para o usuário
-function showError(msg) {
-    const err = document.getElementById('error');
-    if (!err) return;
-    err.textContent = msg;
-    err.classList.remove('hidden');
-}
+    // Telas principais
+    welcomeScreen: document.getElementById('welcomeScreen'),
+    weatherDisplay: document.getElementById('weatherDisplay'),
 
-// Limpa qualquer mensagem de erro visível
-function clearError() {
-    const err = document.getElementById('error');
-    if (!err) return;
-    err.textContent = '';
-    err.classList.add('hidden');
-}
+    // Indicadores de estado
+    loadingOverlay: document.getElementById('loadingOverlay'),
+    errorToast: document.getElementById('errorToast'),
+    suggestions: document.getElementById('suggestions'),
 
-// Alterna o estado global de carregamento na UI (spinner + desabilita botão de busca)
-// Entrada: on (boolean) - true para mostrar carregamento, false para ocultar
-function setLoading(on) {
-    const loading = document.getElementById('loading');
-    const searchBtn = document.getElementById('searchButton');
-    if (on) {
-        loading.classList.remove('hidden');
-        loading.setAttribute('aria-hidden', 'false');
-        if (searchBtn) searchBtn.disabled = true;
-    } else {
-        loading.classList.add('hidden');
-        loading.setAttribute('aria-hidden', 'true');
-        if (searchBtn) searchBtn.disabled = false;
-    }
-}
+    // Header
+    headerTemp: document.getElementById('headerTemp'),
+    headerLocation: document.getElementById('headerLocation'),
+    refreshBtn: document.getElementById('refreshBtn'),
 
-// Wrapper em torno de fetch() que valida o status HTTP e retorna JSON.
-// Lança erro em respostas não 2xx para que o chamador trate a exceção.
-async function fetchJson(url) {
-    const res = await fetch(url);
-    if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status} - ${txt}`);
-    }
-    return res.json();
-}
+    // Modal de favoritos
+    favoritesToggle: document.getElementById('openFavoritesModal'),
+    favoritesModal: document.getElementById('favoritesModal'),
+    favoritesBackdrop: document.getElementById('favoritesBackdrop'),
+    closeFavorites: document.getElementById('closeFavorites'),
+    favoritesList: document.getElementById('favoritesList'),
+    clearFavorites: document.getElementById('clearFavorites'),
 
-// Busca sugestões de cidade usando a API de Geocoding da OpenWeather.
-// Entrada: query (string) - nome parcial da cidade
-// Saída: array de objetos simplificados: { name, lat, lon, state, country }
-// Em caso de erro retorna array vazio e registra no console.
-async function fetchCitySuggestions(query) {
-    if (!query) return [];
-    const url = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(query)}&limit=6&appid=${API_KEY}`;
-    try {
-        const data = await fetchJson(url);
-        return data.map(d => ({ name: d.name, lat: d.lat, lon: d.lon, state: d.state || '', country: d.country }));
-    } catch (err) {
-        console.error('Erro sugestões:', err);
-        return [];
-    }
-}
+    // Dados do clima - IDs atualizados
+    cityName: document.getElementById('cityName'),
+    coordinates: document.getElementById('coordinates'),
+    mainTemp: document.getElementById('mainTemp'),
+    feelsLike: document.getElementById('feelsLike'),
+    weatherIcon: document.getElementById('weatherIcon'),
+    weatherDescription: document.getElementById('weatherDescription'),
+    lastUpdate: document.getElementById('lastUpdate'),
+    sunInfo: document.getElementById('sunInfo'),
+    addFavorite: document.getElementById('addFavorite'),
 
-// Renderiza o dropdown de sugestões abaixo do campo de busca.
-// Recebe `list` como retornado por fetchCitySuggestions.
-// Cada sugestão é focalizável por teclado e contém lat/lon em atributos data-*
-function renderSuggestions(list) {
-    const ul = document.getElementById('suggestions');
-    if (!ul) return;
-    if (!list.length) {
-        ul.classList.add('hidden');
-        ul.innerHTML = '';
-        return;
-    }
-    ul.innerHTML = list.map((item, idx) => `
-        <li role="option" data-idx="${idx}" data-lat="${item.lat}" data-lon="${item.lon}" class="suggestion-item" tabindex="0">
-            <span class="suggestion-name">${item.name}</span><span class="suggestion-details">${item.state ? `- ${item.state}` : ''} (${item.country})</span>
-        </li>
-    `).join('');
-    ul.classList.remove('hidden');
-}
+    // Detalhes meteorológicos
+    windSpeed: document.getElementById('windSpeed'),
+    humidity: document.getElementById('humidity'),
+    pressure: document.getElementById('pressure'),
+    visibility: document.getElementById('visibility'),
 
-// Oculta e limpa a lista de sugestões
-function clearSuggestions() {
-    const ul = document.getElementById('suggestions');
-    if (!ul) return;
-    ul.innerHTML = '';
-    ul.classList.add('hidden');
-}
+    // Previsão - ID atualizado
+    forecastCards: document.getElementById('forecastContainer'),
 
-// Usuário selecionou uma sugestão (clique ou teclado).
-// Lê lat/lon do elemento, atualiza `selectedLocation`, preenche o input
-// e dispara a busca do tempo para as coordenadas selecionadas.
-function selectSuggestion(el) {
-    const lat = parseFloat(el.dataset.lat);
-    const lon = parseFloat(el.dataset.lon);
-    const label = el.querySelector('.suggestion-name')?.textContent || el.textContent;
-    const stateText = el.querySelector('.suggestion-details')?.textContent || '';
-    selectedLocation = { name: label, lat, lon, state: stateText };
-    document.getElementById('cityInput').value = `${label} ${stateText}`.trim();
-    clearSuggestions();
-    searchWeatherByCoords(lat, lon);
-}
+    // Toast
+    closeToast: document.getElementById('closeToast'),
 
-// Busca o tempo atual e a previsão (5 dias) para as coordenadas fornecidas e atualiza a UI.
-// - Preenche o cartão principal, os cards de previsão e o visual da condição
-// - Garante tratamento de estado de carregamento e erros
-async function searchWeatherByCoords(lat, lon) {
-    clearError();
-    setLoading(true);
-    try {
-        const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=${unit}&lang=pt_br`;
-        const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=${unit}&lang=pt_br`;
-        const [weather, forecast] = await Promise.all([fetchJson(weatherUrl), fetchJson(forecastUrl)]);
-
-        document.getElementById('cityName').textContent = `${weather.name}, ${weather.sys?.country || ''}`;
-        document.getElementById('temperature').textContent = Math.round(weather.main.temp);
-        document.getElementById('description').textContent = weather.weather[0].description;
-        document.getElementById('feelsLike').textContent = Math.round(weather.main.feels_like) + (unit === 'metric' ? '°C' : '°F');
-        document.getElementById('humidity').textContent = weather.main.humidity + '%';
-        document.getElementById('windSpeed').textContent = formatWind(weather.wind.speed);
-        document.getElementById('weatherIcon').src = `https://openweathermap.org/img/wn/${weather.weather[0].icon}@4x.png`;
-        document.getElementById('currentWeather').classList.remove('hidden');
-
-        try { renderConditionVisual(weather); } catch (e) { console.error('render visual', e); }
-
-        const cards = [];
-        for (let i = 0; i < (forecast.list?.length || 0); i += 8) {
-            const item = forecast.list[i];
-            if (!item) continue;
-            const dateLabel = new Date(item.dt * 1000).toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric' });
-            cards.push({ dateLabel, icon: item.weather[0].icon, temp: Math.round(item.main.temp), temp_min: Math.round(item.main.temp_min) });
-            if (cards.length === 5) break;
-        }
-        const html = cards.map(c => `
-            <div class="forecast-card" tabindex="0">
-                <div class="forecast-date">${c.dateLabel}</div>
-                <img class="forecast-icon" src="https://openweathermap.org/img/wn/${c.icon}@2x.png" alt=""> 
-                <div class="forecast-temp">${c.temp}°</div>
-                <div class="forecast-temp-min">Min: ${c.temp_min}°</div>
-            </div>
-        `).join('');
-        document.getElementById('forecastCards').innerHTML = html;
-        document.getElementById('forecast').classList.remove('hidden');
-    } catch (err) {
-        console.error(err);
-        showError('Erro ao buscar dados do tempo.');
-    } finally {
-        setLoading(false);
-    }
-}
-
-// Mapeamento de condição simples para cor e rótulo localizado.
-// Usado por renderConditionVisual para escolher cor e texto do ícone.
-const CONDITION_PALETTE = {
-    clear: { color: '#FFD54F', label: 'Ensolarado' },
-    clouds: { color: '#90A4AE', label: 'Nublado' },
-    rain: { color: '#4FC3F7', label: 'Chuvoso' },
-    drizzle: { color: '#81D4FA', label: 'Chuvisco' },
-    thunderstorm: { color: '#4FC3F7', label: 'Trovoadas' },
-    snow: { color: '#B3E5FC', label: 'Nevando' },
-    mist: { color: '#cfcfcf', label: 'Neblina' },
-    fog: { color: '#cfcfcf', label: 'Neblina' },
-    haze: { color: '#cfcfcf', label: 'Neblina' },
-    default: { color: '#FFFFFF', label: '' }
+    // Elementos responsivos
+    sidebarToggle: document.getElementById('sidebarToggle'),
+    sidebarOverlay: document.getElementById('sidebarOverlay'),
+    sidebar: document.querySelector('.sidebar')
 };
 
-// Retorna uma string SVG inline (HTML) para um conjunto reduzido de ícones.
-// `name` escolhe o formato; `color` tinge a arte SVG.
-function svgIcon(name, color) {
-    if (name === 'sun') return `
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <defs><radialGradient id="g1"><stop offset="0%" stop-color="${color}" stop-opacity="1"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0.25"/></radialGradient></defs>
-            <circle cx="32" cy="32" r="14" fill="url(#g1)" />
-            <g stroke="${color}" stroke-width="2" stroke-linecap="round">
-                <line x1="32" y1="4" x2="32" y2="14" />
-                <line x1="32" y1="50" x2="32" y2="60" />
-                <line x1="4" y1="32" x2="14" y2="32" />
-                <line x1="50" y1="32" x2="60" y2="32" />
-                <line x1="12" y1="12" x2="19" y2="19" />
-                <line x1="45" y1="45" x2="52" y2="52" />
-                <line x1="12" y1="52" x2="19" y2="45" />
-                <line x1="45" y1="19" x2="52" y2="12" />
-            </g>
-        </svg>`;
-    if (name === 'cloud') return `
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M50 40H18a10 10 0 0 1 0-20 14 14 0 0 1 27-3 10 10 0 0 1 5 23z" fill="${color}" opacity="0.95" />
-        </svg>`;
-    if (name === 'rain') return `
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M46 28a10 10 0 0 0-19-5 14 14 0 0 0-7 26h28" fill="${color}" opacity="0.9" />
-            <g fill="#fff">
-                <path d="M22 48c0 3-3 6-3 6s-3-3-3-6 3-6 3-6 3 3 3 6z"/>
-                <path d="M34 48c0 3-3 6-3 6s-3-3-3-6 3-6 3-6 3 3 3 6z"/>
-                <path d="M46 48c0 3-3 6-3 6s-3-3-3-6 3-6 3-6 3 3 3 6z"/>
-            </g>
-        </svg>`;
-    if (name === 'snow') return `
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <g fill="${color}">
-                <circle cx="20" cy="44" r="3" />
-                <circle cx="32" cy="48" r="3" />
-                <circle cx="44" cy="44" r="3" />
-            </g>
-        </svg>`;
-    if (name === 'fog') return `
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M10 36h44v4H10z" fill="${color}" opacity="0.9" />
-            <path d="M6 44h52v4H6z" fill="${color}" opacity="0.7" />
-        </svg>`;
-    return '';
+// ========== INICIALIZAÇÃO ==========
+document.addEventListener('DOMContentLoaded', () => {
+    initializeApp();
+});
+
+function initializeApp() {
+    // Depuração: verificar se elementos críticos estão presentes
+    console.log('Inicializando app. Elementos DOM:', {
+        mainTemp: DOM.mainTemp,
+        cityName: DOM.cityName,
+        weatherIcon: DOM.weatherIcon,
+        weatherDescription: DOM.weatherDescription,
+        forecastCards: DOM.forecastCards,
+        addFavorite: DOM.addFavorite
+    });
+
+    showWelcomeScreen();
+    loadFavorites();
+    setupEventListeners();
+    updateHeaderInfo('Selecione uma cidade', '--°');
 }
 
-// Cria e insere um pequeno ícone SVG colorido + rótulo em #weatherVisual
-// `weather` é o objeto de tempo atual da OpenWeather; analisamos weather[0].main
-function renderConditionVisual(weather) {
-    const root = document.getElementById('weatherVisual');
-    if (!root) return;
-    root.innerHTML = '';
-    const main = (weather.weather && weather.weather[0] && weather.weather[0].main) ? weather.weather[0].main.toLowerCase() : '';
-    let key = 'default';
-    if (main.includes('clear')) key = 'clear';
-    else if (main.includes('cloud')) key = 'clouds';
-    else if (main.includes('rain')) key = 'rain';
-    else if (main.includes('drizzle')) key = 'drizzle';
-    else if (main.includes('thunder')) key = 'thunderstorm';
-    else if (main.includes('snow') || main.includes('sleet')) key = 'snow';
-    else if (main.includes('mist') || main.includes('fog') || main.includes('haze')) key = 'fog';
+// ========== CONFIGURAÇÃO DE EVENTOS ==========
+function setupEventListeners() {
+    // Eventos de pesquisa
+    DOM.searchBtn.addEventListener('click', handleSearch);
+    DOM.cityInput.addEventListener('keypress', handleSearchKeypress);
+    DOM.cityInput.addEventListener('input', handleCityInput);
+    DOM.locationBtn.addEventListener('click', getCurrentLocation);
 
-    const palette = CONDITION_PALETTE[key] || CONDITION_PALETTE.default;
-    const iconName = (key === 'clear') ? 'sun' : (key === 'clouds' ? 'cloud' : (key === 'rain' || key === 'drizzle' || key === 'thunderstorm') ? 'rain' : (key === 'snow' ? 'snow' : 'fog'));
-    const wrapper = document.createElement('div');
-    wrapper.className = 'condition-icon';
-    wrapper.innerHTML = svgIcon(iconName, palette.color) + `<div class="condition-label">${palette.label}</div>`;
-    root.appendChild(wrapper);
+    // Controles de unidade
+    DOM.unitToggle.addEventListener('click', toggleUnit);
+
+    // Header
+    DOM.refreshBtn.addEventListener('click', refreshWeather);
+
+    // Modal de favoritos
+    DOM.favoritesToggle.addEventListener('click', toggleFavoritesModal);
+    DOM.closeFavorites.addEventListener('click', closeFavoritesModal);
+    DOM.favoritesBackdrop.addEventListener('click', closeFavoritesModal);
+    DOM.clearFavorites.addEventListener('click', clearAllFavorites);
+
+    // Favoritos
+    if (DOM.addFavorite) {
+        DOM.addFavorite.addEventListener('click', addCurrentCityToFavorites);
+        console.log('Botão de favoritos configurado com sucesso');
+    } else {
+        console.error('Botão addFavorite não encontrado no DOM');
+    }
+
+    // Toast de erro
+    if (DOM.closeToast) {
+        DOM.closeToast.addEventListener('click', hideErrorToast);
+    }
+
+    // Sidebar responsiva
+    if (DOM.sidebarToggle) {
+        DOM.sidebarToggle.addEventListener('click', toggleSidebar);
+    }
+
+    if (DOM.sidebarOverlay) {
+        DOM.sidebarOverlay.addEventListener('click', closeSidebar);
+    }
+
+    // Fechar sugestões ao clicar fora
+    document.addEventListener('click', (e) => {
+        if (!DOM.cityInput.contains(e.target) && !DOM.suggestions.contains(e.target)) {
+            hideSuggestions();
+        }
+    });
 }
 
-// Formata a velocidade do vento para exibição. Converte m/s para km/h no modo métrico.
-// Retorna uma string como '12.3 km/h' ou '7.8 mph'.
-function formatWind(speed) {
-    if (!speed && speed !== 0) return '-';
-    const val = unit === 'metric' ? (speed * 3.6) : speed; // m/s -> km/h
-    return unit === 'metric' ? `${val.toFixed(1)} km/h` : `${val.toFixed(1)} mph`;
+// ========== FUNÇÕES DE CONTROLE DE TELA ==========
+function showWelcomeScreen() {
+    DOM.welcomeScreen.classList.remove('hidden');
+    DOM.weatherDisplay.classList.add('hidden');
 }
 
-// Gerenciamento de favoritos usando localStorage.
-// Cada favorito é um objeto de local simplificado (mesma estrutura usada no app).
-function loadFavorites() {
-    try {
-        const raw = localStorage.getItem('weather_favs') || '[]';
-        return JSON.parse(raw);
-    } catch { return []; }
+function hideWelcomeScreen() {
+    DOM.welcomeScreen.classList.add('hidden');
+    DOM.weatherDisplay.classList.remove('hidden');
 }
 
-function saveFavorites(list) {
-    localStorage.setItem('weather_favs', JSON.stringify(list));
+function showLoading() {
+    DOM.loadingOverlay.classList.remove('hidden');
 }
 
-function renderFavorites() {
-    const list = loadFavorites();
-    const container = document.getElementById('favoritesList');
-    const section = document.getElementById('favoritesSection');
-    if (!container || !section) return;
-    if (!list.length) {
-        section.classList.add('hidden');
-        container.innerHTML = '';
+function hideLoading() {
+    DOM.loadingOverlay.classList.add('hidden');
+}
+
+function showErrorToast(message) {
+    const toastMessage = DOM.errorToast.querySelector('.toast-message');
+    if (toastMessage) {
+        toastMessage.textContent = message;
+    }
+    DOM.errorToast.classList.remove('hidden');
+
+    // Ocultar automaticamente após 5 segundos
+    setTimeout(() => {
+        hideErrorToast();
+    }, 5000);
+}
+
+function hideErrorToast() {
+    DOM.errorToast.classList.add('hidden');
+}
+
+// ========== FUNÇÕES DE PESQUISA ==========
+function handleSearch() {
+    const city = DOM.cityInput.value.trim();
+    if (city) {
+        searchWeather(city);
+        hideSuggestions();
+    }
+}
+
+function handleSearchKeypress(e) {
+    if (e.key === 'Enter') {
+        handleSearch();
+    }
+}
+
+async function searchWeather(city) {
+    if (!city || typeof city !== 'string') {
+        showErrorToast('Nome da cidade inválido');
         return;
     }
-    section.classList.remove('hidden');
-    container.innerHTML = list.map((f, idx) => `
-        <div class="favorite-card" draggable="true" data-idx="${idx}" tabindex="0">
-            <div style="display:flex;align-items:center;gap:8px;width:100%;">
-                <span class="drag-handle" aria-hidden="true">☰</span>
-                <div style="flex:1">
-                    <div class="fav-label">${f.name} ${f.state ? `- ${f.state}` : ''}</div>
-                    <div class="fav-meta">${f.country || ''}</div>
+
+    try {
+        showLoading();
+        console.log('Buscando clima para:', city);
+
+        const [weatherData, forecastData] = await Promise.all([
+            fetchWeatherData(city),
+            fetchForecastData(city)
+        ]);
+
+        currentCityData = weatherData;
+        displayWeather(weatherData);
+        displayForecast(forecastData);
+        hideWelcomeScreen();
+        hideLoading();
+
+        // Atualizar header
+        updateHeaderInfo(weatherData.name, Math.round(weatherData.main.temp));
+
+        // Preencher input com nome correto da cidade
+        DOM.cityInput.value = weatherData.name;
+
+        // Fechar sidebar em mobile após pesquisa
+        handleMobileSearch();
+
+        console.log('Pesquisa concluída com sucesso:', weatherData.name);
+
+    } catch (error) {
+        hideLoading();
+        const errorMessage = error.message || 'Erro ao buscar dados do clima';
+        showErrorToast(errorMessage);
+        console.error('Erro na pesquisa:', error);
+
+        // Manter tela de boas-vindas se não houver dados anteriores
+        if (!currentCityData) {
+            showWelcomeScreen();
+        }
+    }
+}
+
+async function getCurrentLocation() {
+    if (!navigator.geolocation) {
+        showErrorToast('Geolocalização não suportada pelo navegador');
+        return;
+    }
+
+    showLoading();
+
+    const options = {
+        enableHighAccuracy: true,
+        timeout: 30000, // Timeout ainda maior para melhor precisão
+        maximumAge: 0, // Sempre buscar localização atual
+        desiredAccuracy: 100 // Precisão desejada em metros
+    };
+
+    navigator.geolocation.getCurrentPosition(
+        async (position) => {
+            try {
+                const { latitude, longitude, accuracy } = position.coords;
+                console.log('Localização obtida:', { latitude, longitude, accuracy });
+
+                // Verificar precisão - se muito imprecisa, tentar novamente
+                if (accuracy > 1000) {
+                    console.warn('Precisão baixa (', accuracy, 'm), tentando novamente...');
+                    setTimeout(() => getCurrentLocation(), 2000);
+                    return;
+                }
+
+                // Buscar dados do clima pela coordenada
+                const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+                const weatherResponse = await fetch(weatherUrl);
+
+                if (!weatherResponse.ok) {
+                    throw new Error('Não foi possível obter dados para esta localização');
+                }
+
+                const weatherData = await weatherResponse.json();
+                console.log('Dados da API OpenWeather:', weatherData);
+
+                // Múltiplas tentativas de geocodificação reversa
+                let resolvedLocation = await reverseGeocode(latitude, longitude);
+
+                // Se a primeira geocodificação reversa falhar, tentar com coordenadas ligeiramente ajustadas
+                if (!resolvedLocation || !resolvedLocation.name) {
+                    console.log('Primeira tentativa de geocodificação reversa falhou, tentando ajustada...');
+                    resolvedLocation = await reverseGeocode(latitude + 0.001, longitude + 0.001) ||
+                        await reverseGeocode(latitude - 0.001, longitude - 0.001);
+                }
+
+                console.log('Geocodificação reversa resultado final:', resolvedLocation);
+
+                // Determinar o melhor nome para a cidade
+                let cityName = null;
+                let displayName = null;
+
+                // PRIORIDADE 1: Geocodificação reversa com localização precisa
+                if (resolvedLocation && resolvedLocation.name && resolvedLocation.name.length > 1) {
+                    console.log('✓ Usando geocodificação reversa:', resolvedLocation.fullName || resolvedLocation.name);
+                    cityName = resolvedLocation.name;
+                    displayName = resolvedLocation.fullName || resolvedLocation.name;
+
+                    // Validar se o nome faz sentido (não é só números ou caracteres estranhos)
+                    if (!/^[\d\.,\s°-]+$/.test(cityName)) {
+                        weatherData.fullLocationName = displayName;
+                    } else {
+                        resolvedLocation = null; // Invalidar se nome não faz sentido
+                    }
+                }
+
+                // PRIORIDADE 2: Nome da interface OpenWeather (se geocodificação reversa falhou)
+                if (!cityName && weatherData.name && weatherData.name.length > 1 && !/^[\d\.,\s°-]+$/.test(weatherData.name)) {
+                    console.log('✓ Usando API OpenWeather:', weatherData.name);
+                    cityName = weatherData.name;
+                    displayName = weatherData.name;
+
+                    // Tentar melhorar com informações do país se disponível
+                    if (weatherData.sys && weatherData.sys.country) {
+                        const countryNames = {
+                            'BR': 'Brasil', 'US': 'Estados Unidos', 'CA': 'Canadá', 'MX': 'México',
+                            'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colômbia', 'PE': 'Peru'
+                        };
+                        const countryName = countryNames[weatherData.sys.country] || weatherData.sys.country;
+                        displayName += ` - ${countryName}`;
+                    }
+                }
+
+                // PRIORIDADE 3: Fallback para coordenadas (último recurso)
+                if (!cityName) {
+                    console.log('⚠ Usando coordenadas como fallback');
+                    const latStr = latitude.toFixed(3);
+                    const lonStr = longitude.toFixed(3);
+                    cityName = `Localização Atual`;
+                    displayName = `${latStr}°, ${lonStr}°`;
+                }
+
+                // Atualizar o objeto com o melhor nome encontrado
+                weatherData.name = displayName;
+                weatherData.cityKey = cityName; // Chave para comparações
+
+                // Buscar previsão do tempo
+                const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+                const forecastResponse = await fetch(forecastUrl);
+                const forecastData = forecastResponse.ok ? await forecastResponse.json() : null;
+
+                // Processar e exibir dados
+                currentCityData = weatherData;
+                displayWeather(weatherData);
+
+                if (forecastData) {
+                    displayForecast(forecastData);
+                }
+
+                hideWelcomeScreen();
+                hideLoading();
+
+                // Atualizar interface
+                updateHeaderInfo(weatherData.name, Math.round(weatherData.main.temp));
+                DOM.cityInput.value = weatherData.name;
+
+                console.log('Localização processada com sucesso:', weatherData.name);
+
+            } catch (error) {
+                hideLoading();
+                showErrorToast('Erro ao obter localização: ' + (error.message || 'Erro desconhecido'));
+                console.error('Erro de localização:', error);
+            }
+        },
+        (error) => {
+            hideLoading();
+            let errorMessage = 'Erro ao acessar localização';
+
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    errorMessage = 'Permissão de localização negada';
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    errorMessage = 'Localização indisponível';
+                    break;
+                case error.TIMEOUT:
+                    errorMessage = 'Tempo esgotado para obter localização';
+                    break;
+            }
+
+            showErrorToast(errorMessage);
+            console.error('Erro de geolocalização:', error);
+        },
+        options
+    );
+}
+
+// ========== GEOCODIFICAÇÃO REVERSA ==========
+
+function refreshWeather() {
+    if (currentCityData && currentCityData.name) {
+        searchWeather(currentCityData.name);
+    } else {
+        showErrorToast('Nenhuma cidade selecionada para atualizar');
+    }
+}
+
+// ========== FUNÇÕES DE INTERFACE DE PROGRAMAÇÃO ==========
+async function fetchWeatherData(city) {
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+    console.log('Buscando dados do clima para:', city);
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Cidade não encontrada');
+    }
+
+    const data = await response.json();
+
+    if (!data.main || !data.weather || !data.weather[0]) {
+        throw new Error('Dados meteorológicos incompletos');
+    }
+
+    // Validar e melhorar o nome da cidade
+    if (data.name && data.coord) {
+        // Tentar obter nome mais preciso via geocodificação reversa se disponível
+        try {
+            const betterLocation = await reverseGeocode(data.coord.lat, data.coord.lon);
+            if (betterLocation && betterLocation.fullName && betterLocation.fullName.length > data.name.length) {
+                console.log('Melhorando nome da cidade:', data.name, '->', betterLocation.fullName);
+                data.name = betterLocation.fullName;
+                data.cityKey = betterLocation.name;
+            }
+        } catch (error) {
+            console.warn('Erro ao melhorar nome da cidade:', error);
+        }
+    }
+
+    console.log('Dados do clima obtidos para:', data.name);
+    return data;
+}
+
+async function fetchForecastData(city) {
+    const url = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Erro ao buscar previsão');
+    }
+
+    const data = await response.json();
+
+    if (!data.list || !Array.isArray(data.list)) {
+        throw new Error('Dados de previsão indisponíveis');
+    }
+
+    return data;
+}
+
+async function reverseGeocode(lat, lon) {
+    try {
+        // Garantir precisão das coordenadas
+        const precision = 6;
+        const roundedLat = parseFloat(lat.toFixed(precision));
+        const roundedLon = parseFloat(lon.toFixed(precision));
+
+        const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${roundedLat}&lon=${roundedLon}&limit=3&appid=${API_KEY}`;
+        console.log('Fazendo geocodificação reversa para:', { lat: roundedLat, lon: roundedLon });
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('Resposta do geocodificação reversa:', data);
+
+        if (Array.isArray(data) && data.length > 0) {
+            // Tentar encontrar a melhor localização na lista
+            let bestLocation = null;
+
+            for (const location of data) {
+                // Priorizar localizações com nome em português ou nome mais completo
+                const cityName = location.local_names?.pt || location.local_names?.['pt-BR'] || location.name;
+
+                // Validar se o nome é válido (não apenas números/coordenadas)
+                if (cityName && cityName.length > 1 && !/^[\d\.,\s°-]+$/.test(cityName)) {
+                    // Priorizar localizações brasileiras se coordenadas no Brasil
+                    if (location.country === 'BR' && roundedLat > -35 && roundedLat < 6 && roundedLon > -75 && roundedLon < -30) {
+                        bestLocation = location;
+                        break;
+                    } else if (!bestLocation) {
+                        bestLocation = location;
+                    }
+                }
+            }
+
+            if (bestLocation) {
+                const location = bestLocation;
+
+                // Priorizar nomes em português
+                let cityName = location.local_names?.pt || location.local_names?.['pt-BR'] || location.name;
+
+                // Validação final do nome
+                if (!cityName || cityName.length < 2 || /^[\d\.,\s°-]+$/.test(cityName)) {
+                    console.warn('Nome da cidade inválido no geocodificação reversa:', cityName);
+                    return null;
+                }
+
+                // Construir nome completo com contexto
+                let fullName = cityName;
+
+                if (location.state) {
+                    fullName += `, ${location.state}`;
+                }
+
+                if (location.country) {
+                    // Mapear códigos de país para nomes em português
+                    const countryNames = {
+                        'BR': 'Brasil', 'US': 'Estados Unidos', 'CA': 'Canadá', 'MX': 'México',
+                        'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colômbia', 'PE': 'Peru',
+                        'UY': 'Uruguai', 'PY': 'Paraguai', 'BO': 'Bolívia', 'EC': 'Equador',
+                        'VE': 'Venezuela', 'GY': 'Guiana', 'SR': 'Suriname', 'GF': 'Guiana Francesa',
+                        'FR': 'França', 'DE': 'Alemanha', 'IT': 'Itália', 'ES': 'Espanha',
+                        'PT': 'Portugal', 'GB': 'Reino Unido', 'IE': 'Irlanda', 'NL': 'Países Baixos',
+                        'BE': 'Bélgica', 'CH': 'Suíça', 'AT': 'Áustria', 'JP': 'Japão',
+                        'CN': 'China', 'IN': 'Índia', 'AU': 'Austrália', 'NZ': 'Nova Zelândia',
+                        'ZA': 'África do Sul'
+                    };
+
+                    const countryName = countryNames[location.country] || location.country;
+                    fullName += ` - ${countryName}`;
+                }
+
+                console.log('Geocodificação reversa bem-sucedido:', { cityName, fullName });
+                return {
+                    name: cityName,
+                    fullName: fullName,
+                    state: location.state || '',
+                    country: location.country || '',
+                    coordinates: { lat: roundedLat, lon: roundedLon }
+                };
+            }
+        }
+
+        console.warn('Nenhuma localização válida encontrada no geocodificação reversa');
+        return null;
+    } catch (error) {
+        console.error('Erro no geocodificação reversa:', error);
+        return null;
+    }
+}
+
+// ========== EXIBIÇÃO DOS DADOS ==========
+function displayWeather(data) {
+    if (!data || !data.main || !data.weather || !data.weather[0]) {
+        showErrorToast('Dados meteorológicos inválidos');
+        return;
+    }
+
+    console.log('Exibindo dados do clima:', data);
+    console.log('Verificando elementos DOM:', {
+        mainTemp: DOM.mainTemp,
+        cityName: DOM.cityName,
+        feelsLike: DOM.feelsLike,
+        weatherDescription: DOM.weatherDescription,
+        weatherIcon: DOM.weatherIcon
+    });
+
+    const unitSymbol = currentUnit === 'metric' ? '°C' : '°F';
+
+    // Informações principais - priorizar nome da interface do clima
+    const cityName = data.name || 'Local desconhecido';
+    const cityDisplay = currentCityData?.fullName || cityName;
+
+    // Atualizar elementos da tela principal
+    if (DOM.cityName) DOM.cityName.textContent = cityDisplay;
+    if (DOM.mainTemp) {
+        const tempValue = Math.round(data.main.temp) + unitSymbol;
+        console.log('Atualizando temperatura principal:', tempValue);
+        DOM.mainTemp.textContent = tempValue;
+    } else {
+        console.error('Elemento mainTemp não encontrado no DOM!');
+    }
+    if (DOM.feelsLike) DOM.feelsLike.textContent = `Sensação: ${Math.round(data.main.feels_like)}${unitSymbol}`;
+    if (DOM.weatherDescription) {
+        const description = data.weather[0].description || 'Condição não disponível';
+        console.log('Atualizando descrição do tempo:', description);
+        DOM.weatherDescription.textContent = description;
+    } else {
+        console.error('Elemento weatherDescription não encontrado no DOM!');
+    }
+    if (DOM.weatherIcon) DOM.weatherIcon.textContent = getWeatherEmoji(
+        data.weather[0].main,
+        data.timezone,
+        data.sys?.sunrise,
+        data.sys?.sunset
+    );
+
+    // Coordenadas formatadas com símbolos de graus
+    if (data.coord && typeof data.coord.lat === 'number' && typeof data.coord.lon === 'number') {
+        const lat = data.coord.lat.toFixed(4);
+        const lon = data.coord.lon.toFixed(4);
+        if (DOM.coordinates) DOM.coordinates.textContent = `${lat}°, ${lon}°`;
+    } else {
+        if (DOM.coordinates) DOM.coordinates.textContent = 'Coordenadas não disponíveis';
+    }
+
+    // Detalhes meteorológicos
+    if (DOM.humidity) DOM.humidity.textContent = (data.main.humidity || 0) + '%';
+    if (DOM.pressure) DOM.pressure.textContent = (data.main.pressure || 0) + ' hPa';
+
+    // Vento - conversão e formatação correta
+    let windSpeed = 'N/A';
+    if (data.wind && typeof data.wind.speed === 'number') {
+        if (currentUnit === 'metric') {
+            // m/s para km/h
+            windSpeed = (data.wind.speed * 3.6).toFixed(1) + ' km/h';
+        } else {
+            // m/s para mph
+            windSpeed = (data.wind.speed * 2.237).toFixed(1) + ' mph';
+        }
+    }
+    if (DOM.windSpeed) DOM.windSpeed.textContent = windSpeed;
+
+    // Visibilidade - metros para quilômetros
+    const visibility = (data.visibility && typeof data.visibility === 'number') ?
+        (data.visibility / 1000).toFixed(1) + ' km' : 'N/A';
+    if (DOM.visibility) DOM.visibility.textContent = visibility;
+
+    // Informações adicionais
+    const now = new Date();
+    if (DOM.lastUpdate) {
+        DOM.lastUpdate.textContent = now.toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    // Nascer e pôr do sol com fuso horário local
+    if (data.sys && data.sys.sunrise && data.sys.sunset) {
+        const sunrise = new Date(data.sys.sunrise * 1000).toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        const sunset = new Date(data.sys.sunset * 1000).toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        if (DOM.sunInfo) DOM.sunInfo.textContent = `🌅 ${sunrise} | 🌇 ${sunset}`;
+    } else {
+        if (DOM.sunInfo) DOM.sunInfo.textContent = '🌅 --:-- | 🌇 --:--';
+    }
+
+    // Atualizar header com localização encurtada
+    const shortLocation = cityName.length > 20 ? cityName.substring(0, 17) + '...' : cityName;
+    updateHeaderInfo(shortLocation, Math.round(data.main.temp) + unitSymbol);
+
+    // Verificar se é favorito
+    updateFavoriteButton(cityName);
+
+    // Mostrar dashboard e esconder tela de boas-vindas
+    showWeatherDisplay();
+}
+
+// ========== FUNÇÕES DE INTERFACE ==========
+function showWelcomeScreen() {
+    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.remove('hidden');
+    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.add('hidden');
+}
+
+function showWeatherDisplay() {
+    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.add('hidden');
+    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.remove('hidden');
+}
+
+function updateHeaderInfo(location, temperature) {
+    if (DOM.headerLocation) DOM.headerLocation.textContent = location;
+    if (DOM.headerTemp) DOM.headerTemp.textContent = temperature;
+}
+
+function showLoading() {
+    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.remove('hidden');
+}
+
+function hideLoading() {
+    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.add('hidden');
+}
+
+function showErrorToast(message) {
+    if (DOM.errorToast) {
+        const messageEl = DOM.errorToast.querySelector('.toast-message');
+        if (messageEl) messageEl.textContent = message;
+        DOM.errorToast.classList.remove('hidden');
+
+        // Ocultar automaticamente após 5 segundos
+        setTimeout(() => {
+            hideErrorToast();
+        }, 5000);
+    }
+}
+
+function hideErrorToast() {
+    if (DOM.errorToast) DOM.errorToast.classList.add('hidden');
+}
+
+function displayForecast(data) {
+    if (!data || !data.list || !Array.isArray(data.list)) {
+        console.warn('Dados de previsão indisponíveis');
+        DOM.forecastCards.innerHTML = '<div class="forecast-error">Previsão não disponível</div>';
+        return;
+    }
+
+    console.log('Exibindo previsão:', data);
+
+    const unitSymbol = currentUnit === 'metric' ? '°' : '°';
+    let html = '';
+
+    // Selecionar dados para os próximos 5 dias únicos
+    const forecastDays = [];
+    const processedDates = new Set();
+    const dailyData = new Map(); // Para agrupar dados por dia
+
+    // Primeiro, agrupar todos os dados por dia para calcular min/max corretas
+    for (const item of data.list) {
+        if (!item || !item.main || !item.weather || !item.weather[0]) continue;
+
+        const date = new Date(item.dt * 1000);
+        const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+        if (!dailyData.has(dateKey)) {
+            dailyData.set(dateKey, {
+                items: [],
+                tempMax: item.main.temp_max || item.main.temp,
+                tempMin: item.main.temp_min || item.main.temp,
+                weather: item.weather[0],
+                dt: item.dt,
+                date: date
+            });
+        }
+
+        const dayData = dailyData.get(dateKey);
+        dayData.items.push(item);
+        dayData.tempMax = Math.max(dayData.tempMax, item.main.temp_max || item.main.temp);
+        dayData.tempMin = Math.min(dayData.tempMin, item.main.temp_min || item.main.temp);
+    }
+
+    // Selecionar os próximos 5 dias únicos
+    const sortedDays = Array.from(dailyData.values())
+        .sort((a, b) => a.dt - b.dt)
+        .slice(0, 5);
+
+    sortedDays.forEach((dayData, index) => {
+        const dayName = dayData.date.toLocaleDateString('pt-BR', { weekday: 'short' });
+        const dayNumber = dayData.date.getDate();
+
+        const tempMax = Math.round(dayData.tempMax);
+        const tempMin = Math.round(dayData.tempMin);
+        const description = dayData.weather.description || 'Condição não disponível';
+
+        // Usar horário atual para determinar se é dia ou noite (não o horário da previsão)
+        const forecastTimezone = data.city?.timezone || 0;
+        const now = new Date();
+        const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+        const localCurrentTime = new Date(utc + (forecastTimezone * 1000));
+        const currentHour = localCurrentTime.getHours();
+
+        // Determinar se agora é dia ou noite
+        const isCurrentlyDaytime = currentHour >= 6 && currentHour < 18;
+
+        const icon = getWeatherEmoji(
+            dayData.weather.main,
+            forecastTimezone,
+            isCurrentlyDaytime ? Date.now() / 1000 : null, // usar horário atual
+            isCurrentlyDaytime ? null : Date.now() / 1000  // usar horário atual
+        );
+
+        html += `
+            <div class="forecast-card" title="${description}">
+                <div class="forecast-date">${dayName}, ${dayNumber}</div>
+                <div class="forecast-weather-icon">${icon}</div>
+                <div class="forecast-temps">
+                    <div class="forecast-high">
+                        <span class="temp-label">Máx</span>
+                        <span class="temp-value">${tempMax}${unitSymbol}</span>
+                    </div>
+                    <div class="forecast-low">
+                        <span class="temp-label">Mín</span>
+                        <span class="temp-value">${tempMin}${unitSymbol}</span>
+                    </div>
+                </div>
+                <div class="forecast-description" title="${description}">
+                    ${description}
                 </div>
             </div>
-            <div class="fav-actions">
-                <button data-idx="${idx}" class="fav-open" title="Abrir">
-                    <!-- ícone de abrir -->
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Abrir
-                </button>
-                <button data-idx="${idx}" class="fav-remove" title="Remover">
-                    <!-- ícone de lixeira -->
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6M10 6V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Remover
-                </button>
-            </div>
-        </div>
-    `).join('');
-
-    // anexa handlers de drag diretamente aos cards (cada card)
-    let dragSrcIdx = null;
-    container.querySelectorAll('.favorite-card').forEach(card => {
-        card.addEventListener('dragstart', (e) => {
-            dragSrcIdx = parseInt(card.dataset.idx, 10);
-            card.classList.add('dragging');
-            try { e.dataTransfer.setData('text/plain', String(dragSrcIdx)); } catch (err) { }
-            e.dataTransfer.effectAllowed = 'move';
-        });
-        card.addEventListener('dragend', () => {
-            card.classList.remove('dragging');
-        });
-        card.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            card.classList.add('drag-over');
-        });
-        card.addEventListener('dragleave', () => {
-            card.classList.remove('drag-over');
-        });
-        card.addEventListener('drop', (e) => {
-            e.preventDefault();
-            card.classList.remove('drag-over');
-            const src = parseInt(e.dataTransfer.getData('text/plain'), 10);
-            const dest = parseInt(card.dataset.idx, 10);
-            if (Number.isFinite(src) && Number.isFinite(dest) && src !== dest) {
-                const arr = loadFavorites();
-                const [item] = arr.splice(src, 1);
-                arr.splice(dest, 0, item);
-                saveFavorites(arr);
-                renderFavorites();
-            }
-        });
+        `;
     });
+
+    DOM.forecastCards.innerHTML = html || '<div class="forecast-error">Previsão não disponível</div>';
 }
 
-function addFavoriteFromCurrent() {
-    // Lê o nome da cidade visível e insere selectedLocation nos favoritos.
-    const name = document.getElementById('cityName')?.textContent;
-    if (!name) return;
-    const loc = selectedLocation || { name };
-    const list = loadFavorites();
-    // avoid duplicates by name
-    if (list.find(i => i.name === loc.name)) return;
-    list.unshift(loc);
-    if (list.length > 8) list.pop();
-    saveFavorites(list);
-    renderFavorites();
-}
+function updateHeaderInfo(location, temperature) {
+    const unitSymbol = currentUnit === 'metric' ? '°C' : '°F';
 
-function removeFavorite(idx) {
-    const list = loadFavorites();
-    list.splice(idx, 1);
-    saveFavorites(list);
-    renderFavorites();
-}
-
-function openFavorite(idx) {
-    const list = loadFavorites();
-    const f = list[idx];
-    if (!f) return;
-    if (f.lat && f.lon) searchWeatherByCoords(f.lat, f.lon);
-}
-
-// Geolocalização (navigator.geolocation)
-function locateMe() {
-    if (!navigator.geolocation) {
-        showError('Geolocalização não suportada pelo navegador.');
-        return;
+    // Encurtar nome da localização se muito longo para o header
+    let shortLocation = location;
+    if (location.length > 30) {
+        const parts = location.split(',');
+        shortLocation = parts[0]; // Usar apenas o nome da cidade
     }
-    setLoading(true);
-    navigator.geolocation.getCurrentPosition((pos) => {
-        const { latitude, longitude } = pos.coords;
-        searchWeatherByCoords(latitude, longitude);
-    }, (err) => {
-        showError('Não foi possível obter sua localização.');
-        setLoading(false);
-    }, { enableHighAccuracy: true, timeout: 10000 });
+
+    DOM.headerLocation.textContent = shortLocation;
+    DOM.headerTemp.textContent = typeof temperature === 'number' ?
+        `${temperature}${unitSymbol}` : temperature;
 }
 
-// Aplica um tema simples baseado na descrição principal do tempo
-function applyThemeFromWeather(main) {
-    const root = document.documentElement;
-    root.classList.remove('theme-clear', 'theme-clouds', 'theme-rain', 'theme-snow');
-    if (!main) return;
-    const key = main.toLowerCase();
-    if (key.includes('clear')) root.classList.add('theme-clear');
-    else if (key.includes('cloud')) root.classList.add('theme-clouds');
-    else if (key.includes('rain') || key.includes('drizzle') || key.includes('thunder')) root.classList.add('theme-rain');
-    else if (key.includes('snow') || key.includes('sleet')) root.classList.add('theme-snow');
-}
-
-// --- Animated weather visuals ---
-// --- Animated weather visuals removed per user request ---
-
-async function handleSearch() {
-    clearError();
-    const input = document.getElementById('cityInput');
-    if (!input) return;
-    const query = input.value.trim();
-    if (!query) {
-        showError('Por favor, digite o nome de uma cidade.');
-        return;
-    }
-    setLoading(true);
-    try {
-        let loc = selectedLocation;
-        if (!loc || (loc.name && !query.startsWith(loc.name))) {
-            const results = await fetchCitySuggestions(query);
-            if (!results || results.length === 0) {
-                throw new Error('Cidade não encontrada.');
-            }
-            loc = results[0];
-        }
-        await searchWeatherByCoords(loc.lat, loc.lon);
-    } catch (err) {
-        console.error(err);
-        showError(err.message || 'Erro ao buscar dados do tempo.');
-    } finally {
-        setLoading(false);
-    }
-}
-
+// ========== SISTEMA DE UNIDADES ==========
 function toggleUnit() {
-    unit = unit === 'metric' ? 'imperial' : 'metric';
-    const btn = document.getElementById('unitToggle');
-    if (btn) {
-        btn.textContent = unit === 'metric' ? '°C' : '°F';
-        btn.setAttribute('aria-pressed', unit === 'imperial');
+    currentUnit = currentUnit === 'metric' ? 'imperial' : 'metric';
+
+    // Atualizar interface do botão
+    const metricOption = DOM.unitToggle.querySelector('[data-unit="metric"]');
+    const imperialOption = DOM.unitToggle.querySelector('[data-unit="imperial"]');
+
+    if (currentUnit === 'metric') {
+        metricOption.classList.add('active');
+        imperialOption.classList.remove('active');
+        DOM.unitToggle.setAttribute('data-unit', 'metric');
+    } else {
+        imperialOption.classList.add('active');
+        metricOption.classList.remove('active');
+        DOM.unitToggle.setAttribute('data-unit', 'imperial');
     }
-    if (document.getElementById('currentWeather').classList.contains('hidden')) return;
-    handleSearch();
+
+    // Recarregar dados se houver cidade atual
+    if (currentCityData) {
+        searchWeather(currentCityData.name);
+    }
 }
 
-function setupEvents() {
-    // Conecta eventos do DOM para input de busca, botões, sugestões e favoritos.
-    // Cobre: sugestões com debounce, navegação por teclado nas sugestões, botão de busca,
-    // alternância de unidade, botão de localização, abrir/remover favoritos e render inicial.
-    const input = document.getElementById('cityInput');
-    const btn = document.getElementById('searchButton');
-    const toggle = document.getElementById('unitToggle');
-    if (input) {
-        let debounceTimeout;
-        input.addEventListener('input', async (e) => {
-            clearTimeout(debounceTimeout);
-            debounceTimeout = setTimeout(async () => {
-                try {
-                    const results = await fetchCitySuggestions(input.value);
-                    renderSuggestions(results);
-                } catch (err) {
-                    console.error(err);
-                }
-            }, 400);
+// ========== SISTEMA DE SUGESTÕES ==========
+function handleCityInput() {
+    const query = DOM.cityInput.value.trim();
+
+    if (query.length < 2) {
+        hideSuggestions();
+        return;
+    }
+
+    showSuggestions(query);
+}
+
+function showSuggestions(query) {
+    // Lista de cidades populares para sugestões
+    const popularCities = [
+        'São Paulo', 'Rio de Janeiro', 'Brasília', 'Salvador', 'Fortaleza',
+        'Belo Horizonte', 'Manaus', 'Curitiba', 'Recife', 'Porto Alegre',
+        'Goiânia', 'Belém', 'Guarulhos', 'Campinas', 'São Luís',
+        'Nova York', 'Londres', 'Paris', 'Tóquio', 'Pequim',
+        'Madrid', 'Roma', 'Berlim', 'Moscou', 'Mumbai',
+        'Buenos Aires', 'Mexico City', 'Toronto', 'Sydney', 'Melbourne'
+    ];
+
+    const filteredCities = popularCities.filter(city =>
+        city.toLowerCase().includes(query.toLowerCase())
+    ).slice(0, 5);
+
+    if (filteredCities.length > 0) {
+        let html = '';
+        filteredCities.forEach(city => {
+            html += `<div class="suggestion-item" onclick="selectCity('${city}')">${city}</div>`;
         });
 
-        // keyboard navigation for suggestions
-        input.addEventListener('keydown', (e) => {
-            const ul = document.getElementById('suggestions');
-            if (!ul || ul.classList.contains('hidden')) return;
-            const items = Array.from(ul.querySelectorAll('.suggestion-item'));
-            const active = ul.querySelector('.active');
-            let idx = active ? items.indexOf(active) : -1;
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                if (idx < items.length - 1) idx++;
-                items.forEach(it => it.classList.remove('active'));
-                items[idx]?.classList.add('active');
-                items[idx]?.focus();
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                if (idx > 0) idx--;
-                items.forEach(it => it.classList.remove('active'));
-                items[idx]?.classList.add('active');
-                items[idx]?.focus();
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                if (idx >= 0 && items[idx]) selectSuggestion(items[idx]);
-                else handleSearch();
-            } else if (e.key === 'Escape') {
-                clearSuggestions();
-            }
-        });
+        DOM.suggestions.innerHTML = html;
+        DOM.suggestions.classList.add('visible');
+    } else {
+        hideSuggestions();
     }
-    // delegated click + keyboard activation for suggestion items
-    const suggestions = document.getElementById('suggestions');
-    if (suggestions) {
-        suggestions.addEventListener('click', (e) => {
-            const li = e.target.closest('.suggestion-item');
-            if (!li) return;
-            selectSuggestion(li);
-        });
-        suggestions.addEventListener('keydown', (e) => {
-            const li = e.target.closest('.suggestion-item');
-            if (!li) return;
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                selectSuggestion(li);
-            }
-        });
-    }
-    if (btn) btn.addEventListener('click', handleSearch);
-    if (toggle) toggle.addEventListener('click', toggleUnit);
-    const locate = document.getElementById('locateButton');
-    if (locate) locate.addEventListener('click', locateMe);
+}
 
-    // favorites actions
-    document.body.addEventListener('click', (e) => {
-        const open = e.target.closest('.fav-open');
-        const rem = e.target.closest('.fav-remove');
-        if (open) {
-            const idx = parseInt(open.dataset.idx, 10);
-            openFavorite(idx);
-        } else if (rem) {
-            const idx = parseInt(rem.dataset.idx, 10);
-            removeFavorite(idx);
+function hideSuggestions() {
+    DOM.suggestions.classList.remove('visible');
+    DOM.suggestions.innerHTML = '';
+}
+
+function selectCity(city) {
+    DOM.cityInput.value = city;
+    hideSuggestions();
+    searchWeather(city);
+}
+
+// ========== SISTEMA DE FAVORITOS ==========
+function toggleFavoritesModal() {
+    DOM.favoritesModal.classList.toggle('hidden');
+    if (!DOM.favoritesModal.classList.contains('hidden')) {
+        loadFavorites();
+    }
+}
+
+function closeFavoritesModal() {
+    DOM.favoritesModal.classList.add('hidden');
+}
+
+function loadFavorites() {
+    if (!DOM.favoritesList) return;
+
+    let html = '';
+
+    if (favorites.length === 0) {
+        html = '<div class="no-favorites" style="text-align: center; color: var(--text-tertiary); padding: 2rem;">Nenhuma cidade favorita ainda</div>';
+    } else {
+        favorites.forEach((city, index) => {
+            html += `
+                <div class="favorite-item" onclick="selectFavoriteCity('${city}')">
+                    <span class="favorite-name">${city}</span>
+                    <button class="favorite-remove" onclick="removeFavorite(${index})" title="Remover">×</button>
+                </div>
+            `;
+        });
+    }
+
+    DOM.favoritesList.innerHTML = html;
+}
+
+function selectFavoriteCity(city) {
+    DOM.cityInput.value = city;
+    closeFavoritesModal();
+    searchWeather(city);
+}
+
+function addToFavorites(cityName) {
+    if (!favorites.includes(cityName)) {
+        favorites.push(cityName);
+        localStorage.setItem('weatherFavorites', JSON.stringify(favorites));
+        loadFavorites();
+        updateFavoriteButton(cityName);
+        showTemporaryNotification(`${cityName} adicionada aos favoritos!`);
+    }
+}
+
+function removeFavorite(index) {
+    const cityName = favorites[index];
+    favorites.splice(index, 1);
+    localStorage.setItem('weatherFavorites', JSON.stringify(favorites));
+    loadFavorites();
+
+    // Atualizar botão se for a cidade atual
+    if (currentCityData && currentCityData.name === cityName) {
+        updateFavoriteButton(currentCityData.name);
+    }
+
+    showTemporaryNotification(`${cityName} removida dos favoritos`);
+}
+
+function addCurrentCityToFavorites() {
+    if (currentCityData && currentCityData.name) {
+        if (favorites.includes(currentCityData.name)) {
+            // Remover se já estiver nos favoritos
+            const index = favorites.indexOf(currentCityData.name);
+            removeFavorite(index);
+        } else {
+            // Adicionar aos favoritos
+            addToFavorites(currentCityData.name);
         }
+    } else {
+        showErrorToast('Nenhuma cidade selecionada para favoritar');
+    }
+}
+
+function clearAllFavorites() {
+    if (favorites.length === 0) {
+        showErrorToast('Nenhum favorito para limpar');
+        return;
+    }
+
+    if (confirm('Tem certeza que deseja limpar todos os favoritos?')) {
+        favorites = [];
+        localStorage.setItem('weatherFavorites', JSON.stringify(favorites));
+        loadFavorites();
+
+        // Atualizar botão se houver cidade atual
+        if (currentCityData) {
+            updateFavoriteButton(currentCityData.name);
+        }
+
+        showTemporaryNotification('Todos os favoritos foram removidos');
+    }
+}
+
+// ========== FUNÇÕES DE INTERFACE ==========
+function showWelcomeScreen() {
+    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.remove('hidden');
+    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.add('hidden');
+}
+
+function showWeatherDisplay() {
+    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.add('hidden');
+    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.remove('hidden');
+}
+
+function updateHeaderInfo(location, temperature) {
+    if (DOM.headerLocation) DOM.headerLocation.textContent = location;
+    if (DOM.headerTemp) DOM.headerTemp.textContent = temperature;
+}
+
+function showLoading() {
+    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.remove('hidden');
+}
+
+function hideLoading() {
+    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.add('hidden');
+}
+
+function showErrorToast(message) {
+    if (DOM.errorToast) {
+        const messageEl = DOM.errorToast.querySelector('.toast-message');
+        if (messageEl) messageEl.textContent = message;
+        DOM.errorToast.classList.remove('hidden');
+
+        // Ocultar automaticamente após 5 segundos
+        setTimeout(() => {
+            hideErrorToast();
+        }, 5000);
+    }
+}
+
+function hideErrorToast() {
+    if (DOM.errorToast) DOM.errorToast.classList.add('hidden');
+}
+
+function updateFavoriteButton(cityName) {
+    if (!DOM.addFavorite || !cityName) return;
+
+    const isFavorite = favorites.includes(cityName);
+
+    if (isFavorite) {
+        DOM.addFavorite.classList.add('active');
+        DOM.addFavorite.title = 'Remover dos favoritos';
+    } else {
+        DOM.addFavorite.classList.remove('active');
+        DOM.addFavorite.title = 'Adicionar aos favoritos';
+    }
+}
+
+// ========== FUNÇÕES DE RESPONSIVIDADE ==========
+function toggleSidebar() {
+    if (DOM.sidebar && DOM.sidebarToggle && DOM.sidebarOverlay) {
+        const isOpen = DOM.sidebar.classList.contains('show');
+
+        if (isOpen) {
+            closeSidebar();
+        } else {
+            openSidebar();
+        }
+    }
+}
+
+function openSidebar() {
+    if (DOM.sidebar && DOM.sidebarToggle && DOM.sidebarOverlay) {
+        DOM.sidebar.classList.add('show');
+        DOM.sidebarToggle.classList.add('active');
+        DOM.sidebarOverlay.classList.add('show');
+        document.body.style.overflow = 'hidden'; // Prevenir scroll do body
+    }
+}
+
+function closeSidebar() {
+    if (DOM.sidebar && DOM.sidebarToggle && DOM.sidebarOverlay) {
+        DOM.sidebar.classList.remove('show');
+        DOM.sidebarToggle.classList.remove('active');
+        DOM.sidebarOverlay.classList.remove('show');
+        document.body.style.overflow = ''; // Restaurar scroll do body
+    }
+}
+
+// Fechar sidebar automaticamente ao selecionar uma cidade em mobile
+function handleMobileSearch() {
+    if (window.innerWidth <= 1023) {
+        closeSidebar();
+    }
+}
+
+// Ajustar layout quando a tela é redimensionada
+function handleResize() {
+    if (window.innerWidth > 1023) {
+        // Em telas maiores, garantir que a sidebar esteja visível e o overlay oculto
+        if (DOM.sidebar) DOM.sidebar.classList.remove('show');
+        if (DOM.sidebarToggle) DOM.sidebarToggle.classList.remove('active');
+        if (DOM.sidebarOverlay) DOM.sidebarOverlay.classList.remove('show');
+        document.body.style.overflow = '';
+    }
+}
+
+// Adicionar listener para redimensionamento
+window.addEventListener('resize', handleResize);
+
+// ========== FUNÇÕES AUXILIARES DE LOCALIZAÇÃO ==========
+function validateCityName(name) {
+    if (!name || typeof name !== 'string') return false;
+
+    // Verificar se não é apenas números, coordenadas ou caracteres especiais
+    const invalidPatterns = [
+        /^[\d\.,\s°-]+$/, // Apenas números e coordenadas
+        /^[^a-zA-ZÀ-ÿ]+$/, // Sem letras
+        /^.{0,1}$/ // Muito curto
+    ];
+
+    return !invalidPatterns.some(pattern => pattern.test(name.trim()));
+}
+
+function normalizeCityName(rawName, country, state) {
+    if (!validateCityName(rawName)) return null;
+
+    let normalized = rawName.trim();
+
+    // Adicionar contexto geográfico se necessário e disponível
+    if (country && country !== 'BR') {
+        const countryNames = {
+            'US': 'Estados Unidos', 'CA': 'Canadá', 'MX': 'México',
+            'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colômbia', 'PE': 'Peru'
+        };
+        const countryName = countryNames[country] || country;
+
+        if (state && !normalized.includes(state)) {
+            normalized += `, ${state}`;
+        }
+        if (!normalized.includes(countryName)) {
+            normalized += ` - ${countryName}`;
+        }
+    } else if (state && country === 'BR' && !normalized.includes(state)) {
+        // Para o Brasil, adicionar estado apenas se não estiver presente
+        normalized += `, ${state}`;
+    }
+
+    return normalized;
+}
+
+// ========== UTILITÁRIOS ==========
+function getWeatherEmoji(weatherMain, timezone = 0, sunrise = null, sunset = null) {
+    // Obter horário atual no fuso horário local
+    const now = new Date();
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const localTime = new Date(utc + (timezone * 1000));
+    const currentHour = localTime.getHours();
+
+    // Determinar se é dia ou noite baseado no nascer/pôr do sol
+    let isDaytime = true;
+
+    if (sunrise && sunset) {
+        const sunriseTime = new Date(sunrise * 1000);
+        const sunsetTime = new Date(sunset * 1000);
+        const currentTime = localTime.getTime();
+
+        isDaytime = currentTime >= sunriseTime.getTime() && currentTime <= sunsetTime.getTime();
+    } else {
+        // Fallback: considerar dia entre 6h e 18h
+        isDaytime = currentHour >= 6 && currentHour < 18;
+    }
+
+    // Emojis baseados no clima e horário
+    const weatherEmojis = {
+        'Clear': {
+            day: '☀️',
+            night: '🌙'
+        },
+        'Clouds': {
+            day: '⛅',
+            night: '☁️'
+        },
+        'Rain': {
+            day: '�️',
+            night: '�🌧️'
+        },
+        'Drizzle': {
+            day: '🌦️',
+            night: '🌧️'
+        },
+        'Thunderstorm': {
+            day: '⛈️',
+            night: '⛈️'
+        },
+        'Snow': {
+            day: '❄️',
+            night: '🌨️'
+        },
+        'Mist': {
+            day: '🌫️',
+            night: '🌫️'
+        },
+        'Smoke': {
+            day: '🌫️',
+            night: '🌫️'
+        },
+        'Haze': {
+            day: '🌫️',
+            night: '🌫️'
+        },
+        'Dust': {
+            day: '🌫️',
+            night: '🌫️'
+        },
+        'Fog': {
+            day: '🌫️',
+            night: '🌫️'
+        },
+        'Sand': {
+            day: '🌫️',
+            night: '🌫️'
+        },
+        'Ash': {
+            day: '🌫️',
+            night: '🌫️'
+        },
+        'Squall': {
+            day: '💨',
+            night: '💨'
+        },
+        'Tornado': {
+            day: '🌪️',
+            night: '🌪️'
+        }
+    };
+
+    const weatherData = weatherEmojis[weatherMain];
+    if (weatherData) {
+        return isDaytime ? weatherData.day : weatherData.night;
+    }
+
+    // Fallback baseado no horário
+    return isDaytime ? '🌤️' : '🌙';
+}
+
+function getTimeContextForForecast(timestamp, timezone = 0) {
+    // Converter timestamp para horário local
+    const date = new Date(timestamp * 1000);
+    const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+    const localTime = new Date(utc + (timezone * 1000));
+    const hour = localTime.getHours();
+
+    // Determinar contexto temporal
+    if (hour >= 6 && hour < 12) {
+        return { period: 'morning', isDaytime: true };
+    } else if (hour >= 12 && hour < 18) {
+        return { period: 'afternoon', isDaytime: true };
+    } else if (hour >= 18 && hour < 21) {
+        return { period: 'evening', isDaytime: false };
+    } else {
+        return { period: 'night', isDaytime: false };
+    }
+}
+
+function showTemporaryNotification(message) {
+    // Criar elemento de notificação
+    const notification = document.createElement('div');
+    notification.className = 'temp-notification';
+    notification.textContent = message;
+
+    // Estilos inline para a notificação
+    Object.assign(notification.style, {
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        background: 'var(--glass-bg)',
+        border: '1px solid var(--border-medium)',
+        borderRadius: 'var(--radius-lg)',
+        padding: 'var(--space-md) var(--space-lg)',
+        color: 'var(--text-primary)',
+        zIndex: '10000',
+        animation: 'fadeInOut 3s ease-in-out',
+        backdropFilter: 'blur(10px)',
+        boxShadow: '0 8px 32px var(--shadow-secondary)',
+        maxWidth: '300px',
+        wordWrap: 'break-word'
     });
 
-    // add a small favorite button to current weather card
-    const current = document.getElementById('currentWeather');
-    if (current) {
-        const favBtn = document.createElement('button');
-        favBtn.textContent = '❤ Favoritar';
-        favBtn.style.position = 'absolute';
-        favBtn.style.right = '18px';
-        favBtn.style.top = '18px';
-        favBtn.className = 'unit-toggle';
-        favBtn.addEventListener('click', addFavoriteFromCurrent);
-        current.appendChild(favBtn);
-    }
+    document.body.appendChild(notification);
 
-    // render stored favorites on load
-    renderFavorites();
+    // Remover após 3 segundos
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 3000);
 }
 
-window.addEventListener('DOMContentLoaded', setupEvents);
+// Adicionar estilos CSS para animações das notificações
+function addNotificationStyles() {
+    if (document.getElementById('notification-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'notification-styles';
+    style.textContent = `
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateX(100%) scale(0.9); }
+            15%, 85% { opacity: 1; transform: translateX(0) scale(1); }
+            100% { opacity: 0; transform: translateX(100%) scale(0.9); }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Inicializar estilos na carga da página
+document.addEventListener('DOMContentLoaded', addNotificationStyles);
+
+// ========== FUNCIONALIDADES EXTRAS ==========
+// Duplo clique no card do clima adiciona aos favoritos
+document.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.current-weather-card') && currentCityData) {
+        addCurrentCityToFavorites();
+    }
+});
+
+// Atalhos de teclado
+document.addEventListener('keydown', (e) => {
+    // Ctrl/Cmd + K para focar na pesquisa
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        DOM.cityInput.focus();
+    }
+
+    // Escape para fechar modais
+    if (e.key === 'Escape') {
+        closeFavoritesModal();
+        hideSuggestions();
+        hideErrorToast();
+    }
+
+    // F5 ou Ctrl/Cmd + R para atualizar (interceptar e usar nossa função)
+    if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'r')) {
+        if (currentCityData) {
+            e.preventDefault();
+            refreshWeather();
+        }
+    }
+});
+
+// ========== GLOBAL FUNCTIONS (para uso no HTML) ==========
+// Estas funções precisam estar no escopo global para serem acessíveis via onclick no HTML
+window.selectCity = selectCity;
+window.selectFavoriteCity = selectFavoriteCity;
+window.removeFavorite = removeFavorite;

@@ -1,0 +1,22 @@
+# Assets Directory
+
+Esta pasta contém os recursos visuais do projeto:
+
+- `preview.png` - Screenshot principal da aplicação
+- `screenshots/` - Capturas de tela adicionais
+- `icons/` - Ícones personalizados (se houver)
+- `mockups/` - Designs e mockups (se houver)
+
+## Como adicionar o screenshot do projeto:
+
+1. Tire um screenshot da aplicação rodando
+2. Salve como `preview.png` nesta pasta
+3. O README.md já está configurado para exibir a imagem
+
+## Dicas para um bom screenshot:
+
+- Use uma resolução alta (mínimo 1200px de largura)
+- Mostre a aplicação em uso (com dados carregados)
+- Inclua diferentes seções (sidebar, clima atual, previsão)
+- Considere mostrar tanto desktop quanto mobile
+- Use ferramentas como mockup generators para um visual mais profissional
