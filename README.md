@@ -4,8 +4,16 @@ Uma aplicação web moderna e responsiva para consulta de previsão do tempo com
 
 ## 📸 Preview do Projeto
 
-![TempNow - Previsão do Tempo Inteligente](./assets/previsao%20do%20tempo%20inteligente.png)
+![TempNow - Previsão do Tempo Inteligente](./assets/PREVISAO%20DO%20TEMPO%20INTELIGENTE.png)
 *Screenshot da aplicação TempNow - Previsão do Tempo Inteligente em funcionamento*
+
+<div align="center">
+
+**🚀 [VER PROJETO AO VIVO](https://alisson-miguelferreira.github.io/previsao-do-tempo/) 🚀**
+
+[![Visualizar Projeto](https://img.shields.io/badge/🌤️_Ver_Demo_Online-0a1a2e?style=for-the-badge&logo=github&logoColor=00d4ff)](https://alisson-miguelferreira.github.io/previsao-do-tempo/)
+
+</div>
 
 > **💡 Screenshot atualizado:**
 > ✅ Imagem adicionada: `previsao do tempo inteligente.png`
