@@ -78,6 +78,9 @@ const DOM = {
     lastUpdate: document.getElementById('lastUpdate')
 };
 
+// Timer para debounce das sugestões
+let suggestTimer = null;
+
 // ========== FUNÇÕES BÁSICAS DE INTERFACE (Consolidadas) ==========
 function showWelcomeScreen() {
     if (DOM.welcomeScreen) DOM.welcomeScreen.classList.remove('hidden');
@@ -1141,16 +1144,53 @@ function toggleUnit() {
 // ========== SISTEMA DE SUGESTÕES ==========
 function handleCityInput() {
     const query = DOM.cityInput.value.trim();
-
+    if (suggestTimer) clearTimeout(suggestTimer);
     if (query.length < 2) {
         hideSuggestions();
         return;
     }
-
-    showSuggestions(query);
+    suggestTimer = setTimeout(() => {
+        showSuggestions(query);
+    }, 250);
 }
 
-function showSuggestions(query) {
+async function showSuggestions(query) {
+    // 1) Tentar sugestões pela API de geocodificação (OpenWeather Direct)
+    try {
+        const url = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(query)}&limit=5&appid=${API_KEY}&lang=pt_br`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+            const list = await resp.json();
+            if (Array.isArray(list) && list.length > 0) {
+                const items = [];
+                const seen = new Set();
+                for (const loc of list) {
+                    const city = (loc.local_names && (loc.local_names['pt-BR'] || loc.local_names.pt)) || loc.name;
+                    const country = loc.country || '';
+                    // Para BR, manter apenas City, BR; para outros, City, CC
+                    const label = country ? `${city}, ${country}` : city;
+                    if (!seen.has(label)) {
+                        seen.add(label);
+                        items.push(label);
+                    }
+                }
+
+                if (items.length > 0) {
+                    let html = '';
+                    items.forEach(city => {
+                        html += `<div class="suggestion-item" onclick="selectCity('${city}')">${city}</div>`;
+                    });
+                    DOM.suggestions.innerHTML = html;
+                    DOM.suggestions.classList.add('visible');
+                    return; // sucesso com API
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Sugestões via API falharam, usando fallback local:', e);
+    }
+
+    // 2) Fallback: lista local de populares, filtrada
     // Lista focada em cidades brasileiras principais
     const popularCities = [
         // Capitais brasileiras
