@@ -542,72 +542,40 @@ async function reverseGeocode(lat, lon) {
                 if (owResponse.ok) {
                     const owData = await owResponse.json();
                     console.log('📍 OpenWeather encontrou:', owData);
-
-        if (Array.isArray(data) && data.length > 0) {
-            // Tentar encontrar a melhor localização na lista
-            let bestLocation = null;
-
-            for (const location of data) {
-                // Priorizar localizações com nome em português ou nome mais completo
-                const cityName = location.local_names?.pt || location.local_names?.['pt-BR'] || location.name;
-
-                // Validar se o nome é válido (não apenas números/coordenadas)
-                if (cityName && cityName.length > 1 && !/^[\d\.,\s°-]+$/.test(cityName)) {
-                    // Priorizar localizações brasileiras se coordenadas no Brasil
-                    if (location.country === 'BR' && roundedLat > -35 && roundedLat < 6 && roundedLon > -75 && roundedLon < -30) {
-                        bestLocation = location;
-                        break;
-                    } else if (!bestLocation) {
-                        bestLocation = location;
+                
+                    if (Array.isArray(owData) && owData.length > 0) {
+                        for (const location of owData) {
+                            const cityName = location.local_names?.pt || location.local_names?.['pt-BR'] || location.name;
+                            
+                            if (cityName && cityName.length > 1 && !/^[\d\.,\s°-]+$/.test(cityName)) {
+                                let fullName = cityName;
+                                
+                                if (location.state) {
+                                    fullName += `, ${location.state}`;
+                                }
+                                
+                                if (location.country === 'BR') {
+                                    fullName += ' - Brasil';
+                                }
+                                
+                                bestResult = {
+                                    name: cityName,
+                                    fullName: fullName,
+                                    neighborhood: '',
+                                    city: cityName,
+                                    state: location.state || '',
+                                    country: location.country || '',
+                                    coordinates: { lat: roundedLat, lon: roundedLon },
+                                    source: 'OpenWeather'
+                                };
+                                console.log('✓ OpenWeather encontrou:', bestResult);
+                                break;
+                            }
+                        }
                     }
                 }
-            }
-
-            if (bestLocation) {
-                const location = bestLocation;
-
-                // Priorizar nomes em português
-                let cityName = location.local_names?.pt || location.local_names?.['pt-BR'] || location.name;
-
-                // Validação final do nome
-                if (!cityName || cityName.length < 2 || /^[\d\.,\s°-]+$/.test(cityName)) {
-                    console.warn('Nome da cidade inválido no geocodificação reversa:', cityName);
-                    return null;
-                }
-
-                // Construir nome completo com contexto
-                let fullName = cityName;
-
-                if (location.state) {
-                    fullName += `, ${location.state}`;
-                }
-
-                if (location.country) {
-                    // Mapear códigos de país para nomes em português
-                    const countryNames = {
-                        'BR': 'Brasil', 'US': 'Estados Unidos', 'CA': 'Canadá', 'MX': 'México',
-                        'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colômbia', 'PE': 'Peru',
-                        'UY': 'Uruguai', 'PY': 'Paraguai', 'BO': 'Bolívia', 'EC': 'Equador',
-                        'VE': 'Venezuela', 'GY': 'Guiana', 'SR': 'Suriname', 'GF': 'Guiana Francesa',
-                        'FR': 'França', 'DE': 'Alemanha', 'IT': 'Itália', 'ES': 'Espanha',
-                        'PT': 'Portugal', 'GB': 'Reino Unido', 'IE': 'Irlanda', 'NL': 'Países Baixos',
-                        'BE': 'Bélgica', 'CH': 'Suíça', 'AT': 'Áustria', 'JP': 'Japão',
-                        'CN': 'China', 'IN': 'Índia', 'AU': 'Austrália', 'NZ': 'Nova Zelândia',
-                        'ZA': 'África do Sul'
-                    };
-
-                    const countryName = countryNames[location.country] || location.country;
-                    fullName += ` - ${countryName}`;
-                }
-
-                console.log('Geocodificação reversa bem-sucedido:', { cityName, fullName });
-                return {
-                    name: cityName,
-                    fullName: fullName,
-                    state: location.state || '',
-                    country: location.country || '',
-                    coordinates: { lat: roundedLat, lon: roundedLon }
-                };
+            } catch (error) {
+                console.warn('Erro no OpenWeather Geo:', error);
             }
         }
 
