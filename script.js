@@ -273,52 +273,32 @@ async function getCurrentLocation() {
                 const weatherData = await weatherResponse.json();
                 console.log('Dados da API OpenWeather:', weatherData);
 
-                // Múltiplas tentativas de geocodificação reversa
-                let resolvedLocation = await reverseGeocode(latitude, longitude);
+                // Usar nova função de localização detalhada
+                const detailedLocation = await getDetailedLocation(latitude, longitude);
+                console.log('🎯 Localização detalhada encontrada:', detailedLocation);
 
-                // Se a primeira geocodificação reversa falhar, tentar com coordenadas ligeiramente ajustadas
-                if (!resolvedLocation || !resolvedLocation.name) {
-                    console.log('Primeira tentativa de geocodificação reversa falhou, tentando ajustada...');
-                    resolvedLocation = await reverseGeocode(latitude + 0.001, longitude + 0.001) ||
-                        await reverseGeocode(latitude - 0.001, longitude - 0.001);
-                }
-
-                console.log('Geocodificação reversa resultado final:', resolvedLocation);
-
-                // Determinar o melhor nome para a cidade
+                // Usar resultado da localização detalhada
                 let cityName = null;
                 let displayName = null;
-
-                // PRIORIDADE 1: Geocodificação reversa com localização precisa
-                if (resolvedLocation && resolvedLocation.name && resolvedLocation.name.length > 1) {
-                    console.log('✓ Usando geocodificação reversa:', resolvedLocation.fullName || resolvedLocation.name);
-                    cityName = resolvedLocation.name;
-                    displayName = resolvedLocation.fullName || resolvedLocation.name;
-
-                    // Validar se o nome faz sentido (não é só números ou caracteres estranhos)
-                    if (!/^[\d\.,\s°-]+$/.test(cityName)) {
-                        weatherData.fullLocationName = displayName;
-                    } else {
-                        resolvedLocation = null; // Invalidar se nome não faz sentido
+                
+                if (detailedLocation) {
+                    cityName = detailedLocation.searchQuery;
+                    displayName = detailedLocation.displayName;
+                    weatherData.name = displayName;
+                    weatherData.cityKey = cityName;
+                } else {
+                    // Fallback para método anterior
+                    let resolvedLocation = await reverseGeocode(latitude, longitude);
+                    
+                    if (resolvedLocation && resolvedLocation.name) {
+                        cityName = resolvedLocation.name;
+                        displayName = resolvedLocation.fullName || resolvedLocation.name;
+                        weatherData.name = displayName;
+                        weatherData.cityKey = cityName;
                     }
                 }
 
-                // PRIORIDADE 2: Nome da interface OpenWeather (se geocodificação reversa falhou)
-                if (!cityName && weatherData.name && weatherData.name.length > 1 && !/^[\d\.,\s°-]+$/.test(weatherData.name)) {
-                    console.log('✓ Usando API OpenWeather:', weatherData.name);
-                    cityName = weatherData.name;
-                    displayName = weatherData.name;
-
-                    // Tentar melhorar com informações do país se disponível
-                    if (weatherData.sys && weatherData.sys.country) {
-                        const countryNames = {
-                            'BR': 'Brasil', 'US': 'Estados Unidos', 'CA': 'Canadá', 'MX': 'México',
-                            'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colômbia', 'PE': 'Peru'
-                        };
-                        const countryName = countryNames[weatherData.sys.country] || weatherData.sys.country;
-                        displayName += ` - ${countryName}`;
-                    }
-                }
+                // Fallback caso não tenha encontrado localização detalhada
 
                 // PRIORIDADE 3: Fallback para coordenadas (último recurso)
                 if (!cityName) {
@@ -491,16 +471,77 @@ async function reverseGeocode(lat, lon) {
         const roundedLat = parseFloat(lat.toFixed(precision));
         const roundedLon = parseFloat(lon.toFixed(precision));
 
-        const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${roundedLat}&lon=${roundedLon}&limit=3&appid=${API_KEY}`;
-        console.log('Fazendo geocodificação reversa para:', { lat: roundedLat, lon: roundedLon });
+        console.log('🔍 Iniciando geocodificação reversa avançada para:', { lat: roundedLat, lon: roundedLon });
+        
+        let bestResult = null;
 
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // API 1: Nominatim (OpenStreetMap) - Mais preciso para endereços brasileiros
+        try {
+            console.log('Tentando Nominatim OSM (mais preciso)...');
+            const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${roundedLat}&lon=${roundedLon}&zoom=18&addressdetails=1&accept-language=pt-BR,pt,en`;
+            
+            const nominatimResponse = await fetch(nominatimUrl, {
+                headers: {
+                    'User-Agent': 'TempNow Weather App'
+                }
+            });
+            
+            if (nominatimResponse.ok) {
+                const nominatimData = await nominatimResponse.json();
+                console.log('📍 Nominatim encontrou:', nominatimData);
+                
+                if (nominatimData && nominatimData.address) {
+                    const addr = nominatimData.address;
+                    
+                    // Construir nome detalhado a partir do endereço
+                    let locationParts = [];
+                    let cityName = '';
+                    
+                    // Bairro/Subúrbio
+                    if (addr.suburb || addr.neighbourhood || addr.quarter) {
+                        locationParts.push(addr.suburb || addr.neighbourhood || addr.quarter);
+                    }
+                    
+                    // Cidade
+                    cityName = addr.city || addr.town || addr.village || addr.municipality || '';
+                    if (cityName) {
+                        locationParts.push(cityName);
+                    }
+                    
+                    // Estado
+                    if (addr.state) {
+                        locationParts.push(addr.state);
+                    }
+                    
+                    if (locationParts.length > 0) {
+                        bestResult = {
+                            name: cityName || locationParts[locationParts.length - 1],
+                            fullName: locationParts.join(', '),
+                            neighborhood: addr.suburb || addr.neighbourhood || addr.quarter || '',
+                            city: cityName,
+                            state: addr.state || '',
+                            country: addr.country_code?.toUpperCase() || '',
+                            coordinates: { lat: roundedLat, lon: roundedLon },
+                            source: 'Nominatim'
+                        };
+                        console.log('✅ Nominatim resultado detalhado:', bestResult);
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Erro no Nominatim:', error);
         }
 
-        const data = await response.json();
-        console.log('Resposta do geocodificação reversa:', data);
+        // API 2: OpenWeather Geocoding (backup)
+        if (!bestResult) {
+            try {
+                console.log('Tentando OpenWeather Geocoding...');
+                const owUrl = `https://api.openweathermap.org/geo/1.0/reverse?lat=${roundedLat}&lon=${roundedLon}&limit=3&appid=${API_KEY}`;
+                const owResponse = await fetch(owUrl);
+                
+                if (owResponse.ok) {
+                    const owData = await owResponse.json();
+                    console.log('📍 OpenWeather encontrou:', owData);
 
         if (Array.isArray(data) && data.length > 0) {
             // Tentar encontrar a melhor localização na lista
@@ -570,10 +611,42 @@ async function reverseGeocode(lat, lon) {
             }
         }
 
-        console.warn('Nenhuma localização válida encontrada no geocodificação reversa');
+        console.warn('Nenhuma localização válida encontrada em nenhuma API');
         return null;
     } catch (error) {
         console.error('Erro no geocodificação reversa:', error);
+        return null;
+    }
+}
+
+// Função para detectar localização precisa do usuário
+async function getDetailedLocation(lat, lon) {
+    try {
+        console.log('Detectando localização detalhada...');
+        
+        // Usar a função de geocodificação reversa melhorada
+        const location = await reverseGeocode(lat, lon);
+        
+        if (location) {
+            // Se temos bairro, usar bairro + cidade
+            if (location.neighborhood && location.city) {
+                return {
+                    searchQuery: location.city, // Para a API do clima
+                    displayName: `${location.neighborhood}, ${location.city}`,
+                    isDetailed: true
+                };
+            }
+            // Senão, usar apenas a cidade
+            return {
+                searchQuery: location.name,
+                displayName: location.fullName,
+                isDetailed: false
+            };
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Erro ao detectar localização detalhada:', error);
         return null;
     }
 }
@@ -878,27 +951,30 @@ function handleCityInput() {
 }
 
 function showSuggestions(query) {
-    // Lista de cidades brasileiras com prioridade para RJ e outras regiões
+    // Lista focada em cidades brasileiras principais
     const popularCities = [
-        // Rio de Janeiro - bairros e cidades
-        'Taquara, Rio de Janeiro', 'Copacabana, Rio de Janeiro', 'Ipanema, Rio de Janeiro', 
-        'Barra da Tijuca, Rio de Janeiro', 'Tijuca, Rio de Janeiro', 'Botafogo, Rio de Janeiro',
-        'Niterói, Rio de Janeiro', 'Nova Iguaçu, Rio de Janeiro', 'Duque de Caxias, Rio de Janeiro',
-        'São Gonçalo, Rio de Janeiro', 'Petrópolis, Rio de Janeiro', 'Cabo Frio, Rio de Janeiro',
+        // Capitais brasileiras
+        'Rio de Janeiro', 'São Paulo', 'Brasília', 'Salvador', 'Fortaleza', 
+        'Belo Horizonte', 'Manaus', 'Curitiba', 'Recife', 'Porto Alegre',
+        'Goiânia', 'Belém', 'São Luís', 'Maceió', 'Campo Grande', 
+        'João Pessoa', 'Teresina', 'Aracaju', 'Cuiabá', 'Florianópolis',
+        'Vitória', 'Natal', 'Porto Velho', 'Rio Branco', 'Macapá', 'Boa Vista',
         
-        // São Paulo - principais cidades e bairros
-        'São Paulo', 'Guarulhos, São Paulo', 'Campinas, São Paulo', 'São Bernardo do Campo, São Paulo',
-        'Santo André, São Paulo', 'Osasco, São Paulo', 'Sorocaba, São Paulo', 'Ribeirão Preto, São Paulo',
+        // Região Metropolitana RJ
+        'Niterói', 'Nova Iguaçu', 'Duque de Caxias', 'São Gonçalo', 
+        'Petrópolis', 'Cabo Frio', 'Campos dos Goytacazes', 'Volta Redonda',
         
-        // Outras capitais e cidades importantes
-        'Rio de Janeiro', 'Brasília', 'Salvador', 'Fortaleza', 'Belo Horizonte', 
-        'Manaus', 'Curitiba', 'Recife', 'Porto Alegre', 'Goiânia', 'Belém', 'São Luís',
-        'Maceió', 'Campo Grande', 'João Pessoa', 'Teresina', 'Aracaju', 'Cuiabá',
-        'Florianópolis', 'Vitória', 'Natal', 'Porto Velho', 'Rio Branco',
+        // Região Metropolitana SP  
+        'Guarulhos', 'Campinas', 'São Bernardo do Campo', 'Santo André',
+        'Osasco', 'Sorocaba', 'Ribeirão Preto', 'Santos', 'Jundiaí',
         
-        // Cidades internacionais
-        'Nova York', 'Londres', 'Paris', 'Tóquio', 'Pequim', 'Madrid', 'Roma', 
-        'Berlim', 'Moscou', 'Mumbai', 'Buenos Aires', 'Mexico City', 'Toronto', 'Sydney', 'Melbourne'
+        // Outras cidades importantes
+        'Uberlândia', 'Londrina', 'Joinville', 'Juiz de Fora', 'Contagem',
+        'Aparecida de Goiânia', 'Caxias do Sul', 'Feira de Santana',
+        
+        // Cidades internacionais principais
+        'Nova York', 'Londres', 'Paris', 'Tóquio', 'Pequim', 'Madrid', 
+        'Roma', 'Berlim', 'Buenos Aires', 'Toronto', 'Sydney'
     ];
 
     // Priorizar cidades brasileiras, especialmente do RJ
