@@ -18,8 +18,7 @@
 
     <div class="app-wrapper">
         <!-- Container Central -->
-        <div class="app-wrapper">
-            <!-- Sidebar -->
+        <!-- Sidebar -->
             <aside class="sidebar">
                 <div class="sidebar-content">
                     <!-- Brand -->
@@ -126,15 +125,21 @@
                             <span class="temp-unit">C</span>
                         </div>
                         <div class="weather-info">
+                            <h2 class="city-name" id="cityName">Selecione uma cidade</h2>
+                            <p class="coordinates" id="coordinates">--°, --°</p>
                             <p class="weather-description" id="weatherDescription">Carregando...</p>
                             <div class="weather-details">
                                 <span class="feels-like">Sensação térmica: <span id="feelsLike">--°</span></span>
                                 <span class="humidity">Umidade: <span id="humidity">--%</span></span>
                                 <span class="wind">Vento: <span id="windSpeed">-- km/h</span></span>
+                                <span class="pressure">Pressão: <span id="pressure">-- hPa</span></span>
+                                <span class="visibility">Visibilidade: <span id="visibility">-- km</span></span>
                             </div>
+                            <div class="sun-info" id="sunInfo">🌅 --:-- | 🌇 --:--</div>
+                            <div class="last-update">Atualizado às: <span id="lastUpdate">--:--</span></div>
                         </div>
                         <div class="weather-icon">
-                            <span id="currentWeatherIcon">🌤️</span>
+                            <span id="weatherIcon">🌤️</span>
                         </div>
                     </div>
                 </section>
@@ -206,12 +211,7 @@
                 </div>
             </div>
 
-            <!-- Dashboard do Clima -->
-            <div class="weather-dashboard hidden" id="weatherDisplay">
-
-                <!-- Vazio - conteúdo atual está no main-container -->
-            </div>
-        </div>
+        </main>
 
         <!-- Overlay para sidebar mobile -->
         <div class="sidebar-overlay" id="sidebarOverlay"></div>

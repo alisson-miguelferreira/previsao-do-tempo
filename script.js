@@ -60,7 +60,10 @@ const DOM = {
     // Elementos responsivos
     sidebarToggle: document.getElementById('sidebarToggle'),
     sidebarOverlay: document.getElementById('sidebarOverlay'),
-    sidebar: document.querySelector('.sidebar')
+    sidebar: document.querySelector('.sidebar'),
+
+    // Elementos adicionais
+    lastUpdate: document.getElementById('lastUpdate')
 };
 
 // ========== INICIALIZAÇÃO ==========
@@ -350,6 +353,9 @@ async function getCurrentLocation() {
                 updateHeaderInfo(weatherData.name, Math.round(weatherData.main.temp));
                 DOM.cityInput.value = weatherData.name;
 
+                // Fechar sidebar automaticamente em mobile após usar geolocalização
+                handleMobileSearch();
+
                 console.log('Localização processada com sucesso:', weatherData.name);
 
             } catch (error) {
@@ -393,10 +399,27 @@ function refreshWeather() {
 
 // ========== FUNÇÕES DE INTERFACE DE PROGRAMAÇÃO ==========
 async function fetchWeatherData(city) {
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+    // Tentar primeiro com país específico se for cidade brasileira
+    let url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+    
+    // Se não tiver vírgula e não for cidade internacional óbvia, adicionar ,BR
+    const internationalCities = ['nova york', 'londres', 'paris', 'tóquio', 'pequim', 'madrid', 'roma', 'berlim', 'moscou', 'mumbai', 'buenos aires', 'mexico city', 'toronto', 'sydney', 'melbourne'];
+    const cityLower = city.toLowerCase();
+    
+    if (!city.includes(',') && !internationalCities.some(intCity => cityLower.includes(intCity))) {
+        url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)},BR&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+    }
+    
     console.log('Buscando dados do clima para:', city);
 
-    const response = await fetch(url);
+    let response = await fetch(url);
+
+    // Se falhar com ,BR, tentar sem o país
+    if (!response.ok && url.includes(',BR')) {
+        console.log('Tentativa com ,BR falhou, tentando sem especificar país...');
+        url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+        response = await fetch(url);
+    }
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -429,9 +452,23 @@ async function fetchWeatherData(city) {
 }
 
 async function fetchForecastData(city) {
-    const url = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+    // Usar a mesma lógica de priorização brasileira
+    let url = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+    
+    const internationalCities = ['nova york', 'londres', 'paris', 'tóquio', 'pequim', 'madrid', 'roma', 'berlim', 'moscou', 'mumbai', 'buenos aires', 'mexico city', 'toronto', 'sydney', 'melbourne'];
+    const cityLower = city.toLowerCase();
+    
+    if (!city.includes(',') && !internationalCities.some(intCity => cityLower.includes(intCity))) {
+        url = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)},BR&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+    }
 
-    const response = await fetch(url);
+    let response = await fetch(url);
+
+    // Se falhar com ,BR, tentar sem o país
+    if (!response.ok && url.includes(',BR')) {
+        url = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+        response = await fetch(url);
+    }
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -561,7 +598,7 @@ function displayWeather(data) {
 
     // Informações principais - priorizar nome da interface do clima
     const cityName = data.name || 'Local desconhecido';
-    const cityDisplay = currentCityData?.fullName || cityName;
+    const cityDisplay = data.fullLocationName || cityName;
 
     // Atualizar elementos da tela principal
     if (DOM.cityName) DOM.cityName.textContent = cityDisplay;
@@ -841,19 +878,58 @@ function handleCityInput() {
 }
 
 function showSuggestions(query) {
-    // Lista de cidades populares para sugestões
+    // Lista de cidades brasileiras com prioridade para RJ e outras regiões
     const popularCities = [
-        'São Paulo', 'Rio de Janeiro', 'Brasília', 'Salvador', 'Fortaleza',
-        'Belo Horizonte', 'Manaus', 'Curitiba', 'Recife', 'Porto Alegre',
-        'Goiânia', 'Belém', 'Guarulhos', 'Campinas', 'São Luís',
-        'Nova York', 'Londres', 'Paris', 'Tóquio', 'Pequim',
-        'Madrid', 'Roma', 'Berlim', 'Moscou', 'Mumbai',
-        'Buenos Aires', 'Mexico City', 'Toronto', 'Sydney', 'Melbourne'
+        // Rio de Janeiro - bairros e cidades
+        'Taquara, Rio de Janeiro', 'Copacabana, Rio de Janeiro', 'Ipanema, Rio de Janeiro', 
+        'Barra da Tijuca, Rio de Janeiro', 'Tijuca, Rio de Janeiro', 'Botafogo, Rio de Janeiro',
+        'Niterói, Rio de Janeiro', 'Nova Iguaçu, Rio de Janeiro', 'Duque de Caxias, Rio de Janeiro',
+        'São Gonçalo, Rio de Janeiro', 'Petrópolis, Rio de Janeiro', 'Cabo Frio, Rio de Janeiro',
+        
+        // São Paulo - principais cidades e bairros
+        'São Paulo', 'Guarulhos, São Paulo', 'Campinas, São Paulo', 'São Bernardo do Campo, São Paulo',
+        'Santo André, São Paulo', 'Osasco, São Paulo', 'Sorocaba, São Paulo', 'Ribeirão Preto, São Paulo',
+        
+        // Outras capitais e cidades importantes
+        'Rio de Janeiro', 'Brasília', 'Salvador', 'Fortaleza', 'Belo Horizonte', 
+        'Manaus', 'Curitiba', 'Recife', 'Porto Alegre', 'Goiânia', 'Belém', 'São Luís',
+        'Maceió', 'Campo Grande', 'João Pessoa', 'Teresina', 'Aracaju', 'Cuiabá',
+        'Florianópolis', 'Vitória', 'Natal', 'Porto Velho', 'Rio Branco',
+        
+        // Cidades internacionais
+        'Nova York', 'Londres', 'Paris', 'Tóquio', 'Pequim', 'Madrid', 'Roma', 
+        'Berlim', 'Moscou', 'Mumbai', 'Buenos Aires', 'Mexico City', 'Toronto', 'Sydney', 'Melbourne'
     ];
 
-    const filteredCities = popularCities.filter(city =>
-        city.toLowerCase().includes(query.toLowerCase())
-    ).slice(0, 5);
+    // Priorizar cidades brasileiras, especialmente do RJ
+    const queryLower = query.toLowerCase();
+    const filteredCities = popularCities
+        .filter(city => city.toLowerCase().includes(queryLower))
+        .sort((a, b) => {
+            const aLower = a.toLowerCase();
+            const bLower = b.toLowerCase();
+            
+            // Prioridade 1: Cidades do Rio de Janeiro
+            const aIsRJ = aLower.includes('rio de janeiro');
+            const bIsRJ = bLower.includes('rio de janeiro');
+            if (aIsRJ && !bIsRJ) return -1;
+            if (!aIsRJ && bIsRJ) return 1;
+            
+            // Prioridade 2: Correspondência exata no início
+            const aStartsWith = aLower.startsWith(queryLower);
+            const bStartsWith = bLower.startsWith(queryLower);
+            if (aStartsWith && !bStartsWith) return -1;
+            if (!aStartsWith && bStartsWith) return 1;
+            
+            // Prioridade 3: Cidades brasileiras (sem vírgula = capital)
+            const aIsBrazilian = !aLower.includes(',') || aLower.includes('brasil');
+            const bIsBrazilian = !bLower.includes(',') || bLower.includes('brasil');
+            if (aIsBrazilian && !bIsBrazilian) return -1;
+            if (!aIsBrazilian && bIsBrazilian) return 1;
+            
+            return 0;
+        })
+        .slice(0, 5);
 
     if (filteredCities.length > 0) {
         let html = '';
