@@ -1149,63 +1149,63 @@ function getWeatherEmoji(weatherMain, timezone = 0, sunrise = null, sunset = nul
 
     // Emojis baseados no clima e horário
     const weatherEmojis = {
-        'Clear': {
+        'Clear': { // Céu limpo/ensolarado
             day: '☀️',
             night: '🌙'
         },
-        'Clouds': {
+        'Clouds': { // Nublado/parcialmente nublado
             day: '⛅',
             night: '☁️'
         },
-        'Rain': {
+        'Rain': { // Chuva
             day: '🌧️',
             night: '🌧️'
         },
-        'Drizzle': {
+        'Drizzle': { // Garoa/chuvisco
             day: '🌦️',
             night: '🌧️'
         },
-        'Thunderstorm': {
+        'Thunderstorm': { // Tempestade com raios
             day: '⛈️',
             night: '⛈️'
         },
-        'Snow': {
+        'Snow': { // Neve
             day: '❄️',
-            night: '🌨️'
+            night: '🌨️'            
         },
-        'Mist': {
+        'Mist': { // Névoa
             day: '🌫️',
             night: '🌫️'
         },
-        'Smoke': {
+        'Smoke': { // Fumaça
             day: '🌫️',
             night: '🌫️'
         },
-        'Haze': {
+        'Haze': { // Neblina/bruma
             day: '🌫️',
             night: '🌫️'
         },
-        'Dust': {
+        'Dust': { // Poeira
             day: '🌫️',
             night: '🌫️'
         },
-        'Fog': {
+        'Fog': { // Nevoeiro
             day: '🌫️',
             night: '🌫️'
         },
-        'Sand': {
+        'Sand': { // Tempestade de areia
             day: '🌫️',
             night: '🌫️'
         },
-        'Ash': {
+        'Ash': { // Cinzas vulcânicas
             day: '🌫️',
             night: '🌫️'
         },
-        'Squall': {
+        'Squall': { // Rajada de vento
             day: '💨',
             night: '💨'
         },
-        'Tornado': {
+        'Tornado': { // Tornado
             day: '🌪️',
             night: '🌪️'
         }
