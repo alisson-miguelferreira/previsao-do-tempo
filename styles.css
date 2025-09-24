@@ -373,24 +373,26 @@ body {
 .search-actions {
     display: flex;
     gap: var(--space-sm);
+    flex-wrap: wrap;
 }
 
 .search-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: var(--space-xs);
-    width: auto;
-    min-width: 52px;
-    height: 52px;
-    padding: var(--space-sm) var(--space-md);
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    height: 50px;
+    padding: var(--space-sm) var(--space-sm);
     border: none;
     border-radius: var(--radius-lg);
     cursor: pointer;
     transition: all var(--duration-normal) ease;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     backdrop-filter: blur(10px);
     white-space: nowrap;
+    overflow: hidden;
 }
 
 .btn-icon {
@@ -399,9 +401,12 @@ body {
 }
 
 .btn-text {
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     font-weight: 600;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.2px;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .search-btn.primary {
@@ -1578,54 +1583,16 @@ body {
 }
 
 @media (max-width: 480px) {
-    .welcome-title {
-        font-size: 2rem;
-    }
-
-    .main-temp {
-        font-size: 2.8rem;
-    }
-
-    .weather-icon-large {
-        font-size: 3rem;
-    }
-
-    .forecast-cards {
-        grid-template-columns: 1fr;
-        gap: var(--space-md);
-    }
-
-    /* Esconder texto dos botões em telas pequenas */
-    .btn-text {
-        display: none;
-    }
-
-    .search-btn {
-        width: 52px;
-        min-width: 52px;
-        padding: var(--space-sm);
-    }
-
-    .features-showcase {
-        grid-template-columns: 1fr;
-    }
-
-    .search-btn {
-        width: 48px;
-        height: 48px;
-    }
-
-    .hero-animation {
-        height: 150px;
-    }
-
-    .floating-icon {
-        font-size: 3rem;
-    }
-
-    .element {
-        font-size: 1.5rem;
-    }
+    .welcome-title { font-size: 1.6rem; }
+    .main-temp { font-size: 2.6rem; }
+    .weather-icon-large { font-size: 2.4rem; }
+    .forecast-cards { grid-template-columns: 1fr; gap: var(--space-sm); }
+    .search-actions { display:flex; flex-direction:row; gap: var(--space-xs); }
+    .search-btn { height:46px; font-size:1rem; }
+    .btn-text { display:inline-block; max-width:60px; }
+    .hero-animation { height: 120px; }
+    .floating-icon { font-size: 2.4rem; }
+    .element { font-size: 1.2rem; }
 }
 
 /* ========== MELHORIAS PREVISÃO - TEMPERATURAS MIN/MAX ========== */
@@ -1851,6 +1818,28 @@ body {
     flex: 1;
 }
 
+
+/* Novo X profissional com pseudo-elementos */
+.sidebar-toggle::before,
+.sidebar-toggle::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 2.2px;
+    background: var(--text-primary);
+    border-radius: 2px;
+    transition: transform 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.25s;
+}
+.sidebar-toggle::before { transform: translateY(-6px); }
+.sidebar-toggle::after { transform: translateY(6px); }
+
+.sidebar-toggle:not(.active) .hamburger-line { opacity: 1; }
+.sidebar-toggle.active .hamburger-line { opacity: 0; }
+
+.sidebar-toggle.active::before { transform: rotate(45deg); }
+.sidebar-toggle.active::after { transform: rotate(-45deg); }
+
+.sidebar-toggle:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .brand-title {
     font-size: 1.3rem;
     font-weight: 700;
@@ -2453,16 +2442,16 @@ body {
     position: fixed;
     top: 1rem;
     left: 1rem;
-    z-index: 1001;
+    z-index: 2000;
     background: var(--glass-bg);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
-    width: 44px;
-    height: 44px;
+    width: 46px;
+    height: 46px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+    gap: 5px;
     cursor: pointer;
     transition: all 0.3s ease;
     backdrop-filter: blur(10px);
@@ -2506,11 +2495,13 @@ body {
     background: rgba(0, 0, 0, 0.5);
     z-index: 999;
     opacity: 0;
+    pointer-events: none; /* não bloquear toques quando invisível */
     transition: opacity 0.3s ease;
 }
 
 .sidebar-overlay.show {
     opacity: 1;
+    pointer-events: auto; /* só bloqueia quando visível */
 }
 
 /* ========== BREAKPOINTS RESPONSIVOS OTIMIZADOS ========== */
@@ -2571,17 +2562,14 @@ body {
         font-size: 0.85rem;
     }
 
-    .search-actions {
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-
-    .search-btn,
-    .favorites-btn {
+    .search-actions { flex-direction: column; gap: 0.5rem; }
+    .search-btn, .favorites-btn {
         width: 100%;
-        font-size: 0.85rem;
-        padding: 0.75rem;
+        font-size: 0.95rem;
+        padding: 0.8rem;
+        min-width: 0;
     }
+    .btn-text { max-width: 140px; }
 
     .current-weather-summary {
         flex-direction: column;
@@ -2704,11 +2692,9 @@ body {
         display: block;
     }
 
-    .main-container {
-        width: 100%;
-        padding: 2rem;
-        padding-top: 4rem;
-    }
+    .main-container { width: 100%; padding: 2rem; padding-top: 4rem; }
+    .search-actions { flex-wrap: wrap; }
+    .btn-text { max-width: 150px; }
 
     .weather-main {
         flex-direction: row;

@@ -4,6 +4,18 @@ let currentUnit = 'metric';
 let favorites = JSON.parse(localStorage.getItem('weatherFavorites')) || [];
 let currentCityData = null;
 
+// Helper: aplica metadados de localização (bairro, cidade, estado) ao objeto de clima
+function applyLocationMetadata(target, loc) {
+    if (!target || !loc) return;
+    if (loc.neighborhood) target.neighborhood = loc.neighborhood;
+    if (loc.city) target.city = loc.city;
+    if (loc.state) target.state = loc.state;
+    if (loc.country) target.country = loc.country;
+    if (loc.fullName) target.fullLocationName = loc.fullName;
+    if (loc.displayShort) target.displayShort = loc.displayShort;
+    if (!target.name && loc.displayShort) target.name = loc.displayShort;
+}
+
 // ========== ELEMENTOS DO DOM ==========
 const DOM = {
     // Inputs e controles
@@ -66,6 +78,38 @@ const DOM = {
     lastUpdate: document.getElementById('lastUpdate')
 };
 
+// ========== FUNÇÕES BÁSICAS DE INTERFACE (Consolidadas) ==========
+function showWelcomeScreen() {
+    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.remove('hidden');
+    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.add('hidden');
+}
+
+function showWeatherDisplay() {
+    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.add('hidden');
+    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.remove('hidden');
+}
+
+function showLoading() {
+    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.remove('hidden');
+}
+
+function hideLoading() {
+    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.add('hidden');
+}
+
+function showErrorToast(message) {
+    if (!DOM.errorToast) return;
+    const toastMessage = DOM.errorToast.querySelector('.toast-message');
+    if (toastMessage) toastMessage.textContent = message || 'Ocorreu um erro';
+    DOM.errorToast.classList.remove('hidden');
+    clearTimeout(showErrorToast._timeout);
+    showErrorToast._timeout = setTimeout(() => hideErrorToast(), 5000);
+}
+
+function hideErrorToast() {
+    if (DOM.errorToast) DOM.errorToast.classList.add('hidden');
+}
+
 // ========== INICIALIZAÇÃO ==========
 document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
@@ -90,49 +134,41 @@ function initializeApp() {
 
 // ========== CONFIGURAÇÃO DE EVENTOS ==========
 function setupEventListeners() {
-    // Eventos de pesquisa
-    DOM.searchBtn.addEventListener('click', handleSearch);
+    // Substitui binding simples por binding seguro (debounce para mobile)
+    const safeBind = (el, handler) => {
+        if (!el) return;
+        let last = 0;
+        const wrapped = (e) => {
+            const now = Date.now();
+            if (now - last < 300) return; // evita duplo clique/toque
+            last = now;
+            handler(e);
+        };
+        el.addEventListener('click', wrapped);
+        el.addEventListener('touchend', wrapped, { passive: true });
+    };
+
+    safeBind(DOM.searchBtn, handleSearch);
+    safeBind(DOM.locationBtn, getCurrentLocation);
     DOM.cityInput.addEventListener('keypress', handleSearchKeypress);
     DOM.cityInput.addEventListener('input', handleCityInput);
-    DOM.locationBtn.addEventListener('click', getCurrentLocation);
 
-    // Controles de unidade
     DOM.unitToggle.addEventListener('click', toggleUnit);
-
-    // Header
     DOM.refreshBtn.addEventListener('click', refreshWeather);
-
-    // Modal de favoritos
     DOM.favoritesToggle.addEventListener('click', toggleFavoritesModal);
     DOM.closeFavorites.addEventListener('click', closeFavoritesModal);
     DOM.favoritesBackdrop.addEventListener('click', closeFavoritesModal);
     DOM.clearFavorites.addEventListener('click', clearAllFavorites);
 
-    // Favoritos
     if (DOM.addFavorite) {
-        DOM.addFavorite.addEventListener('click', addCurrentCityToFavorites);
-        console.log('Botão de favoritos configurado com sucesso');
-    } else {
-        console.error('Botão addFavorite não encontrado no DOM');
+        DOM.addFavorite.addEventListener('click', () => { addCurrentCityToFavorites(); handleMobileSearch(true); });
     }
+    if (DOM.closeToast) DOM.closeToast.addEventListener('click', hideErrorToast);
+    if (DOM.sidebarToggle) DOM.sidebarToggle.addEventListener('click', toggleSidebar);
+    if (DOM.sidebarOverlay) DOM.sidebarOverlay.addEventListener('click', closeSidebar);
 
-    // Toast de erro
-    if (DOM.closeToast) {
-        DOM.closeToast.addEventListener('click', hideErrorToast);
-    }
-
-    // Sidebar responsiva
-    if (DOM.sidebarToggle) {
-        DOM.sidebarToggle.addEventListener('click', toggleSidebar);
-    }
-
-    if (DOM.sidebarOverlay) {
-        DOM.sidebarOverlay.addEventListener('click', closeSidebar);
-    }
-
-    // Fechar sugestões ao clicar fora
     document.addEventListener('click', (e) => {
-        if (!DOM.cityInput.contains(e.target) && !DOM.suggestions.contains(e.target)) {
+        if (DOM.cityInput && DOM.suggestions && !DOM.cityInput.contains(e.target) && !DOM.suggestions.contains(e.target)) {
             hideSuggestions();
         }
     });
@@ -166,19 +202,23 @@ async function searchWeather(city) {
         showLoading();
         console.log('Buscando clima para:', city);
 
-        const [weatherData, forecastData] = await Promise.all([
-            fetchWeatherData(city),
-            fetchForecastData(city)
-        ]);
-
+        // Buscar clima primeiro
+        const weatherData = await fetchWeatherData(city, { context: 'search' });
         currentCityData = weatherData;
         displayWeather(weatherData);
-        displayForecast(forecastData);
         hideWelcomeScreen();
-        hideLoading();
+        hideErrorToast();
 
-        // Atualizar header
-        updateHeaderInfo(weatherData.name, Math.round(weatherData.main.temp));
+        // Buscar previsão depois, sem derrubar a tela caso falhe
+        try {
+            const forecastData = await fetchForecastData(city);
+            displayForecast(forecastData);
+        } catch (fErr) {
+            console.warn('Previsão indisponível:', fErr);
+            // Não mostrar toast para não confundir o usuário quando clima atual está ok
+        }
+
+        hideLoading();
 
         // Preencher input com nome correto da cidade
         DOM.cityInput.value = weatherData.name;
@@ -202,6 +242,17 @@ async function searchWeather(city) {
 }
 
 async function getCurrentLocation() {
+    // Aviso: geolocalização precisa requer contexto seguro (HTTPS ou http://localhost)
+    try {
+        const insecure = !window.isSecureContext && (location.protocol !== 'http:' || (location.protocol === 'http:' && location.hostname !== 'localhost'));
+        const isFile = location.protocol === 'file:';
+        if (insecure || isFile) {
+            showErrorToast('Para localização EXATA (GPS), abra pelo Live Server (http://localhost) ou HTTPS. Abrir arquivo diretamente (file://) limita o GPS.');
+            console.warn('Contexto inseguro detectado para geolocalização:', { protocol: location.protocol, host: location.host });
+        }
+    } catch (e) {
+        console.warn('Não foi possível verificar contexto seguro:', e);
+    }
     if (!navigator.geolocation) {
         showErrorToast('Geolocalização não suportada pelo navegador');
         return;
@@ -211,83 +262,96 @@ async function getCurrentLocation() {
 
     const options = {
         enableHighAccuracy: true,
-        timeout: 30000, // Timeout ainda maior para melhor precisão
-        maximumAge: 0, // Sempre buscar localização atual
-        desiredAccuracy: 100 // Precisão desejada em metros
+        timeout: 45000, // Timeout mais longo para GPS preciso
+        maximumAge: 5000, // Cache de 5 segundos
+        desiredAccuracy: 50 // Precisão desejada em metros (mais rigorosa)
     };
 
     navigator.geolocation.getCurrentPosition(
         async (position) => {
+            let weatherOk = false;
             try {
                 const { latitude, longitude, accuracy } = position.coords;
                 console.log('Localização obtida:', { latitude, longitude, accuracy });
 
-                // Verificar precisão - se muito imprecisa, tentar novamente
-                if (accuracy > 1000) {
-                    console.warn('Precisão baixa (', accuracy, 'm), tentando novamente...');
-                    setTimeout(() => getCurrentLocation(), 2000);
-                    return;
+                // Aceitar qualquer precisão para evitar loops infinitos
+                if (accuracy > 2000) {
+                    console.warn('Precisão baixa (', accuracy, 'm), mas prosseguindo...');
                 }
 
                 // Buscar dados do clima pela coordenada
                 const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
                 const weatherResponse = await fetch(weatherUrl);
-
                 if (!weatherResponse.ok) {
                     throw new Error('Não foi possível obter dados para esta localização');
                 }
-
                 const weatherData = await weatherResponse.json();
                 console.log('Dados da API OpenWeather:', weatherData);
+                weatherOk = true;
 
-                // Usar nova função de localização detalhada
-                const detailedLocation = await getDetailedLocation(latitude, longitude);
-                console.log('🎯 Localização detalhada encontrada:', detailedLocation);
+                // Usar nome da cidade diretamente do OpenWeather - mais confiável
+                console.log('� Usando dados do OpenWeather:', weatherData.name);
 
-                // Usar resultado da localização detalhada
-                let cityName = null;
-                let displayName = null;
-                
-                if (detailedLocation) {
-                    cityName = detailedLocation.searchQuery;
-                    displayName = detailedLocation.displayName;
-                    weatherData.name = displayName;
-                    weatherData.cityKey = cityName;
-                } else {
-                    // Fallback para método anterior
-                    let resolvedLocation = await reverseGeocode(latitude, longitude);
-                    
-                    if (resolvedLocation && resolvedLocation.name) {
-                        cityName = resolvedLocation.name;
-                        displayName = resolvedLocation.fullName || resolvedLocation.name;
-                        weatherData.name = displayName;
-                        weatherData.cityKey = cityName;
+                // SISTEMA COMPLETO: Buscar bairro + cidade através de geocodificação EXATA
+                try {
+                    console.log('🎯 Iniciando geocodificação para:', weatherData.coord);
+                    const geoData = await reverseGeocode(weatherData.coord.lat, weatherData.coord.lon);
+
+                    if (geoData && geoData.neighborhood && geoData.city) {
+                        // SUCESSO: Bairro + Cidade encontrados
+                        weatherData.displayShort = geoData.displayShort; // "Bairro, Cidade"
+                        weatherData.fullLocationName = geoData.fullName;
+                        weatherData.neighborhood = geoData.neighborhood;
+                        weatherData.city = geoData.city;
+                        weatherData.geoSource = geoData.source;
+
+                        console.log('✅ BAIRRO + CIDADE ENCONTRADOS:', {
+                            bairro: geoData.neighborhood,
+                            cidade: geoData.city,
+                            exibição: geoData.displayShort,
+                            fonte: geoData.source
+                        });
+                    } else {
+                        console.log('⚠️ Bairro não encontrado, usando nome básico:', weatherData.name);
+                        weatherData.displayShort = weatherData.name;
+                        weatherData.fullLocationName = weatherData.name;
+                        weatherData.neighborhood = '';
+                        weatherData.city = weatherData.name;
                     }
+                } catch (geoError) {
+                    console.error('❌ ERRO na geocodificação:', geoError);
+                    weatherData.displayShort = weatherData.name;
+                    weatherData.fullLocationName = weatherData.name;
+                    weatherData.neighborhood = '';
+                    weatherData.city = weatherData.name;
+                }                // Buscar previsão do tempo
+                let forecastData = null;
+                try {
+                    const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+                    const forecastResponse = await fetch(forecastUrl);
+                    forecastData = forecastResponse.ok ? await forecastResponse.json() : null;
+                } catch (e) {
+                    console.warn('Previsão não pôde ser carregada (não fatal):', e);
                 }
-
-                // Fallback caso não tenha encontrado localização detalhada
-
-                // PRIORIDADE 3: Fallback para coordenadas (último recurso)
-                if (!cityName) {
-                    console.log('⚠ Usando coordenadas como fallback');
-                    const latStr = latitude.toFixed(3);
-                    const lonStr = longitude.toFixed(3);
-                    cityName = `Localização Atual`;
-                    displayName = `${latStr}°, ${lonStr}°`;
-                }
-
-                // Atualizar o objeto com o melhor nome encontrado
-                weatherData.name = displayName;
-                weatherData.cityKey = cityName; // Chave para comparações
-
-                // Buscar previsão do tempo
-                const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
-                const forecastResponse = await fetch(forecastUrl);
-                const forecastData = forecastResponse.ok ? await forecastResponse.json() : null;
 
                 // Processar e exibir dados
                 currentCityData = weatherData;
                 displayWeather(weatherData);
+
+                // Tentar refinar automaticamente com uma segunda leitura mais precisa (se necessário)
+                try {
+                    const { latitude: lat0, longitude: lon0, accuracy: acc0 } = position.coords;
+                    refineLocationIfNeeded(lat0, lon0, acc0);
+                } catch (e) {
+                    console.warn('Refino automático não pôde ser iniciado:', e);
+                }
+
+                // Iniciar um watch curto para capturar uma leitura ainda mais precisa
+                try {
+                    startAccuracyWatch(position.coords);
+                } catch (e) {
+                    console.warn('Watch de precisão não pôde ser iniciado:', e);
+                }
 
                 if (forecastData) {
                     displayForecast(forecastData);
@@ -295,9 +359,9 @@ async function getCurrentLocation() {
 
                 hideWelcomeScreen();
                 hideLoading();
+                hideErrorToast();
 
                 // Atualizar interface
-                updateHeaderInfo(weatherData.name, Math.round(weatherData.main.temp));
                 DOM.cityInput.value = weatherData.name;
 
                 // Fechar sidebar automaticamente em mobile após usar geolocalização
@@ -307,8 +371,12 @@ async function getCurrentLocation() {
 
             } catch (error) {
                 hideLoading();
-                showErrorToast('Erro ao obter localização: ' + (error.message || 'Erro desconhecido'));
-                console.error('Erro de localização:', error);
+                if (weatherOk) {
+                    console.warn('Ocorreram erros não fatais após o clima carregar:', error);
+                } else {
+                    showErrorToast('Erro ao obter localização: ' + (error.message || 'Erro desconhecido'));
+                    console.error('Erro de localização:', error);
+                }
             }
         },
         (error) => {
@@ -345,24 +413,29 @@ function refreshWeather() {
 }
 
 // ========== FUNÇÕES DE INTERFACE DE PROGRAMAÇÃO ==========
-async function fetchWeatherData(city) {
-    // Tentar primeiro com país específico se for cidade brasileira
-    let url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
-    
-    // Se não tiver vírgula e não for cidade internacional óbvia, adicionar ,BR
+async function fetchWeatherData(city, opts = {}) {
+    // Aviso de contexto inseguro também no fluxo de busca manual
+    try {
+        const insecure = !window.isSecureContext && (location.protocol !== 'http:' || (location.protocol === 'http:' && location.hostname !== 'localhost'));
+        const isFile = location.protocol === 'file:';
+        if (insecure || isFile) {
+            console.warn('Contexto inseguro (sem HTTPS/localhost) detectado. Precisão de GPS pode estar limitada.');
+        }
+    } catch { }
+    const context = opts.context || 'generic'; // 'search' | 'generic'
+    // Montar URL priorizando cidades brasileiras quando apropriado
     const internationalCities = ['nova york', 'londres', 'paris', 'tóquio', 'pequim', 'madrid', 'roma', 'berlim', 'moscou', 'mumbai', 'buenos aires', 'mexico city', 'toronto', 'sydney', 'melbourne'];
     const cityLower = city.toLowerCase();
-    
-    if (!city.includes(',') && !internationalCities.some(intCity => cityLower.includes(intCity))) {
-        url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)},BR&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
-    }
-    
+    const needsBR = !city.includes(',') && !internationalCities.some(intCity => cityLower.includes(intCity));
+
+    let url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(needsBR ? `${city},BR` : city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
+
     console.log('Buscando dados do clima para:', city);
 
     let response = await fetch(url);
 
-    // Se falhar com ,BR, tentar sem o país
-    if (!response.ok && url.includes(',BR')) {
+    // Se falhar com ,BR, tentar novamente sem especificar país
+    if (!response.ok && needsBR) {
         console.log('Tentativa com ,BR falhou, tentando sem especificar país...');
         url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
         response = await fetch(url);
@@ -379,19 +452,44 @@ async function fetchWeatherData(city) {
         throw new Error('Dados meteorológicos incompletos');
     }
 
-    // Validar e melhorar o nome da cidade
-    if (data.name && data.coord) {
-        // Tentar obter nome mais preciso via geocodificação reversa se disponível
+    // Enriquecer com localização exata quando possível
+    if (data.coord && typeof data.coord.lat === 'number' && typeof data.coord.lon === 'number') {
         try {
-            const betterLocation = await reverseGeocode(data.coord.lat, data.coord.lon);
-            if (betterLocation && betterLocation.fullName && betterLocation.fullName.length > data.name.length) {
-                console.log('Melhorando nome da cidade:', data.name, '->', betterLocation.fullName);
-                data.name = betterLocation.fullName;
-                data.cityKey = betterLocation.name;
+            const geoData = await reverseGeocode(data.coord.lat, data.coord.lon);
+            if (geoData) {
+                // Usar dados enriquecidos mantendo nome base
+                data.displayShort = geoData.displayShort || data.name;
+                data.fullLocationName = geoData.fullName || data.name;
+                data.neighborhood = geoData.neighborhood || '';
+                data.city = geoData.city || data.name;
+                data.geoSource = geoData.source;
+
+                console.log('✨ Dados enriquecidos:', {
+                    original: data.name,
+                    display: data.displayShort,
+                    neighborhood: data.neighborhood,
+                    source: data.geoSource
+                });
+            } else {
+                // Fallback para dados básicos
+                data.displayShort = data.name;
+                data.fullLocationName = data.name;
+                data.neighborhood = '';
+                data.city = data.name;
             }
-        } catch (error) {
-            console.warn('Erro ao melhorar nome da cidade:', error);
+        } catch (e) {
+            console.warn('Geocodificação falhou, usando dados básicos:', e.message);
+            data.displayShort = data.name;
+            data.fullLocationName = data.name;
+            data.neighborhood = '';
+            data.city = data.name;
         }
+    } else {
+        // Sem coordenadas - usar dados básicos
+        data.displayShort = data.name;
+        data.fullLocationName = data.name;
+        data.neighborhood = '';
+        data.city = data.name;
     }
 
     console.log('Dados do clima obtidos para:', data.name);
@@ -401,10 +499,10 @@ async function fetchWeatherData(city) {
 async function fetchForecastData(city) {
     // Usar a mesma lógica de priorização brasileira
     let url = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
-    
+
     const internationalCities = ['nova york', 'londres', 'paris', 'tóquio', 'pequim', 'madrid', 'roma', 'berlim', 'moscou', 'mumbai', 'buenos aires', 'mexico city', 'toronto', 'sydney', 'melbourne'];
     const cityLower = city.toLowerCase();
-    
+
     if (!city.includes(',') && !internationalCities.some(intCity => cityLower.includes(intCity))) {
         url = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)},BR&appid=${API_KEY}&units=${currentUnit}&lang=pt_br`;
     }
@@ -431,203 +529,358 @@ async function fetchForecastData(city) {
     return data;
 }
 
+// Cache robusto para geocodificação
+const geoCache = new Map();
+
+// Sistema de geocodificação reversa com bairro exato
 async function reverseGeocode(lat, lon) {
     try {
-        // Garantir precisão das coordenadas
-        const precision = 6;
+        const precision = 6; // Máxima precisão para localização exata
         const roundedLat = parseFloat(lat.toFixed(precision));
         const roundedLon = parseFloat(lon.toFixed(precision));
 
-        console.log('🔍 Iniciando geocodificação reversa avançada para:', { lat: roundedLat, lon: roundedLon });
-        
-        let bestResult = null;
+        console.log('🎯 INICIANDO GEOCODIFICAÇÃO REVERSA:', {
+            lat: roundedLat,
+            lon: roundedLon,
+            timestamp: new Date().toLocaleTimeString()
+        });
+        const cacheKey = `${roundedLat},${roundedLon}`;
 
-        // API 1: Nominatim (OpenStreetMap) - Mais preciso para endereços brasileiros
+        if (geoCache.has(cacheKey)) {
+            const cached = geoCache.get(cacheKey);
+            console.log('⚡ CACHE HIT - Usando localização em cache:', cached);
+            return cached;
+        }
+
+        let finalResult = null;
+
+        // FASE 1: Obter bairro preciso via Nominatim (melhor para bairros brasileiros)
         try {
-            console.log('Tentando Nominatim OSM (mais preciso)...');
-            const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${roundedLat}&lon=${roundedLon}&zoom=18&addressdetails=1&accept-language=pt-BR,pt,en`;
-            
+            console.log('🔍 FASE 1: Buscando bairro via Nominatim...');
+            const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${roundedLat}&lon=${roundedLon}&zoom=19&addressdetails=1&accept-language=pt-BR,pt&namedetails=1&extratags=1`;
+            console.log('🌐 URL Nominatim:', nominatimUrl);
+
             const nominatimResponse = await fetch(nominatimUrl, {
-                headers: {
-                    'User-Agent': 'TempNow Weather App'
-                }
+                headers: { 'User-Agent': 'TempNow-Weather-App/1.0' }
             });
-            
+
+            console.log('📡 Nominatim Response Status:', nominatimResponse.status, nominatimResponse.statusText);
+
             if (nominatimResponse.ok) {
                 const nominatimData = await nominatimResponse.json();
-                console.log('📍 Nominatim encontrou:', nominatimData);
-                
-                if (nominatimData && nominatimData.address) {
+                console.log('📍 NOMINATIM RESULTADO COMPLETO:', JSON.stringify(nominatimData, null, 2));
+
+                if (nominatimData?.address) {
                     const addr = nominatimData.address;
-                    
-                    // Construir nome detalhado a partir do endereço
-                    let locationParts = [];
-                    let cityName = '';
-                    
-                    // Bairro/Subúrbio
-                    if (addr.suburb || addr.neighbourhood || addr.quarter) {
-                        locationParts.push(addr.suburb || addr.neighbourhood || addr.quarter);
-                    }
-                    
-                    // Cidade
-                    cityName = addr.city || addr.town || addr.village || addr.municipality || '';
-                    if (cityName) {
-                        locationParts.push(cityName);
-                    }
-                    
-                    // Estado
-                    if (addr.state) {
-                        locationParts.push(addr.state);
-                    }
-                    
-                    if (locationParts.length > 0) {
-                        bestResult = {
-                            name: cityName || locationParts[locationParts.length - 1],
-                            fullName: locationParts.join(', '),
-                            neighborhood: addr.suburb || addr.neighbourhood || addr.quarter || '',
-                            city: cityName,
-                            state: addr.state || '',
-                            country: addr.country_code?.toUpperCase() || '',
+                    console.log('🏠 Address components:', addr);
+
+                    // Buscar bairro com prioridade alta e sem duplicações
+                    const neighborhood =
+                        addr.suburb ||
+                        addr.neighbourhood ||
+                        addr.quarter ||
+                        addr.residential ||
+                        addr.locality ||
+                        addr.city_district ||
+                        addr.village ||
+                        addr.hamlet || '';
+
+                    // Buscar cidade com prioridade típica no Brasil
+                    const city =
+                        addr.city ||
+                        addr.municipality ||
+                        addr.town ||
+                        addr.county || '';
+
+                    const state = addr.state || '';
+
+                    console.log('🏘️ Extracted:', {
+                        neighborhood: neighborhood,
+                        city: city,
+                        state: state,
+                        country: addr.country_code
+                    });
+
+                    // Verificar se encontrou bairro E cidade (e são diferentes)
+                    if (neighborhood && city && neighborhood.toLowerCase() !== city.toLowerCase()) {
+                        finalResult = {
+                            name: city,
+                            fullName: state ? `${neighborhood}, ${city}, ${state}` : `${neighborhood}, ${city}`,
+                            neighborhood: neighborhood,
+                            city: city,
+                            state: state,
+                            country: addr.country_code?.toUpperCase() || 'BR',
+                            displayShort: `${neighborhood}, ${city}`,
                             coordinates: { lat: roundedLat, lon: roundedLon },
-                            source: 'Nominatim'
+                            source: 'Nominatim-Exact'
                         };
-                        console.log('✅ Nominatim resultado detalhado:', bestResult);
+                        console.log('✅ SUCESSO NOMINATIM - BAIRRO + CIDADE ENCONTRADOS:', finalResult);
+                    } else {
+                        console.log('⚠️ Nominatim: Bairro ou cidade não encontrados ou são iguais');
                     }
+                } else {
+                    console.log('❌ Nominatim: Nenhum address encontrado');
                 }
             }
         } catch (error) {
-            console.warn('Erro no Nominatim:', error);
+            console.warn('⚠️ Nominatim falhou:', error.message);
         }
 
-        // API 2: OpenWeather Geocoding (backup)
-        if (!bestResult) {
+        // FASE 2: Se não encontrou bairro, tentar via OpenWeather + complementar
+        if (!finalResult) {
+            console.log('🔍 FASE 2: Buscando via OpenWeather (Nominatim falhou)...');
             try {
-                console.log('Tentando OpenWeather Geocoding...');
-                const owUrl = `https://api.openweathermap.org/geo/1.0/reverse?lat=${roundedLat}&lon=${roundedLon}&limit=3&appid=${API_KEY}`;
+                const owUrl = `https://api.openweathermap.org/geo/1.0/reverse?lat=${roundedLat}&lon=${roundedLon}&limit=1&appid=${API_KEY}`;
+                console.log('🌐 URL OpenWeather:', owUrl);
                 const owResponse = await fetch(owUrl);
-                
+
+                console.log('📡 OpenWeather Response Status:', owResponse.status);
+
                 if (owResponse.ok) {
                     const owData = await owResponse.json();
-                    console.log('📍 OpenWeather encontrou:', owData);
-                
+                    console.log('📍 OPENWEATHER RESULTADO COMPLETO:', JSON.stringify(owData, null, 2));
+
                     if (Array.isArray(owData) && owData.length > 0) {
-                        for (const location of owData) {
-                            const cityName = location.local_names?.pt || location.local_names?.['pt-BR'] || location.name;
-                            
-                            if (cityName && cityName.length > 1 && !/^[\d\.,\s°-]+$/.test(cityName)) {
-                                let fullName = cityName;
-                                
-                                if (location.state) {
-                                    fullName += `, ${location.state}`;
+                        const location = owData[0];
+                        const cityName = location.local_names?.pt || location.local_names?.['pt-BR'] || location.name;
+
+                        if (cityName) {
+                            // Tentar complementar com bairro via BigDataCloud
+                            let neighborhood = '';
+                            try {
+                                console.log('🔍 FASE 2B: Complementando com bairro via BigDataCloud...');
+                                const bdcUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${roundedLat}&longitude=${roundedLon}&localityLanguage=pt`;
+                                console.log('🌐 URL BigDataCloud:', bdcUrl);
+                                const bdcResponse = await fetch(bdcUrl);
+
+                                console.log('📡 BigDataCloud Response Status:', bdcResponse.status);
+
+                                if (bdcResponse.ok) {
+                                    const bdcData = await bdcResponse.json();
+                                    console.log('📍 BIGDATACLOUD RESULTADO COMPLETO:', JSON.stringify(bdcData, null, 2));
+
+                                    // Múltiplas estratégias para encontrar bairro (evitar estado/UF)
+                                    const admin = (bdcData.localityInfo && Array.isArray(bdcData.localityInfo.administrative)) ? bdcData.localityInfo.administrative : [];
+                                    const info = (bdcData.localityInfo && Array.isArray(bdcData.localityInfo.informative)) ? bdcData.localityInfo.informative : [];
+                                    const adminNeighborhood = admin.find(a => ['neighbourhood', 'suburb', 'city_district', 'quarter', 'residential', 'locality'].includes((a.description || '').toLowerCase()));
+                                    const infoNeighborhood = info.find(i => ['neighbourhood', 'suburb', 'city_district', 'quarter', 'residential', 'locality'].includes((i.description || '').toLowerCase()));
+                                    neighborhood =
+                                        bdcData.locality ||
+                                        (infoNeighborhood && infoNeighborhood.name) ||
+                                        (adminNeighborhood && adminNeighborhood.name) ||
+                                        '';
+
+                                    // Evitar valores iguais à cidade/estado
+                                    if (neighborhood && (neighborhood.toLowerCase() === (cityName || '').toLowerCase() || neighborhood === bdcData.principalSubdivision)) {
+                                        neighborhood = '';
+                                    }
+
+                                    console.log('🏘️ Bairro extraído do BigDataCloud:', neighborhood);
                                 }
-                                
-                                if (location.country === 'BR') {
-                                    fullName += ' - Brasil';
-                                }
-                                
-                                bestResult = {
-                                    name: cityName,
-                                    fullName: fullName,
-                                    neighborhood: '',
-                                    city: cityName,
-                                    state: location.state || '',
-                                    country: location.country || '',
-                                    coordinates: { lat: roundedLat, lon: roundedLon },
-                                    source: 'OpenWeather'
-                                };
-                                console.log('✓ OpenWeather encontrou:', bestResult);
-                                break;
+                            } catch (e) {
+                                console.error('❌ BigDataCloud falhou:', e.message);
                             }
+
+                            const displayName = neighborhood && neighborhood.toLowerCase() !== cityName.toLowerCase()
+                                ? `${neighborhood}, ${cityName}`
+                                : cityName;
+
+                            finalResult = {
+                                name: cityName,
+                                fullName: location.state ? `${displayName}, ${location.state}` : displayName,
+                                neighborhood: neighborhood,
+                                city: cityName,
+                                state: location.state || '',
+                                country: location.country || 'BR',
+                                displayShort: displayName,
+                                coordinates: { lat: roundedLat, lon: roundedLon },
+                                source: neighborhood ? 'OpenWeather+BDC' : 'OpenWeather'
+                            };
+                            console.log('✅ Resultado final:', finalResult);
                         }
                     }
                 }
             } catch (error) {
-                console.warn('Erro no OpenWeather Geo:', error);
+                console.warn('⚠️ OpenWeather falhou:', error.message);
             }
         }
 
-        // API 3: BigDataCloud Reverse Geocode (bairro detalhado) - sem chave para nível básico
-        if (!bestResult) {
+        // FASE 3: Estratégia final - usar uma API adicional para localidades brasileiras
+        if (!finalResult) {
+            console.log('🔍 FASE 3: Última tentativa com API adicional...');
             try {
-                console.log('Tentando BigDataCloud Geocoding...');
-                const bdcUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${roundedLat}&longitude=${roundedLon}&localityLanguage=pt`;
-                const bdcResponse = await fetch(bdcUrl);
-                if (bdcResponse.ok) {
-                    const bdcData = await bdcResponse.json();
-                    console.log('📍 BigDataCloud encontrou:', bdcData);
-                    if (bdcData && (bdcData.city || bdcData.locality)) {
-                        const neighborhood = bdcData.locality || bdcData.localityInfo?.administrative?.find(a => a.adminLevel === 10)?.name || '';
-                        const cityName = bdcData.city || bdcData.locality || bdcData.principalSubdivision || '';
-                        const state = bdcData.principalSubdivision || '';
-                        const parts = [];
-                        if (neighborhood && neighborhood.toLowerCase() !== cityName.toLowerCase()) parts.push(neighborhood);
-                        if (cityName) parts.push(cityName);
-                        if (state && !parts.includes(state)) parts.push(state);
-                        const fullName = parts.join(', ');
-                        bestResult = {
-                            name: cityName || neighborhood || fullName,
-                            fullName,
-                            neighborhood: neighborhood || '',
-                            city: cityName || '',
-                            state: state || '',
-                            country: bdcData.countryCode || '',
-                            coordinates: { lat: roundedLat, lon: roundedLon },
-                            source: 'BigDataCloud'
-                        };
+                // Usar PostmonAPI (brasileiro) como última tentativa
+                const postmonUrl = `https://api.postmon.com.br/v1/geo/${roundedLat}/${roundedLon}`;
+                console.log('🌐 URL Postmon:', postmonUrl);
+                const postmonResponse = await fetch(postmonUrl);
+
+                if (postmonResponse.ok) {
+                    const postmonData = await postmonResponse.json();
+                    console.log('📍 POSTMON RESULTADO:', JSON.stringify(postmonData, null, 2));
+
+                    if (postmonData && postmonData.city) {
+                        const neighborhood = postmonData.district || '';
+                        const city = postmonData.city;
+                        const state = postmonData.state;
+
+                        if (neighborhood && city && neighborhood.toLowerCase() !== city.toLowerCase()) {
+                            finalResult = {
+                                name: city,
+                                fullName: state ? `${neighborhood}, ${city}, ${state}` : `${neighborhood}, ${city}`,
+                                neighborhood: neighborhood,
+                                city: city,
+                                state: state,
+                                country: 'BR',
+                                displayShort: `${neighborhood}, ${city}`,
+                                coordinates: { lat: roundedLat, lon: roundedLon },
+                                source: 'Postmon-BR'
+                            };
+                            console.log('✅ SUCESSO POSTMON - BAIRRO + CIDADE BRASILEIROS:', finalResult);
+                        }
                     }
                 }
-            } catch (error) {
-                console.warn('Erro no BigDataCloud:', error);
+            } catch (e) {
+                console.warn('⚠️ Postmon falhou:', e.message);
             }
         }
 
-        if (bestResult) {
-            return bestResult;
+        // Cache o resultado se encontrou algo válido
+        if (finalResult) {
+            geoCache.set(cacheKey, finalResult);
+            console.log('💾 Resultado cacheado com sucesso - Fonte:', finalResult.source);
+            return finalResult;
         }
-        console.warn('Nenhuma localização válida encontrada em nenhuma API');
+
+        console.warn('❌ TODAS AS FASES FALHARAM - Nenhuma localização válida encontrada');
+        return null;
+
+    } catch (error) {
+        console.error('💥 Erro crítico na geocodificação:', error);
+        return null;
+    }
+}// Função simplificada para obter localização
+async function getDetailedLocation(lat, lon) {
+    try {
+        console.log('Obtendo localização...');
+
+        const location = await reverseGeocode(lat, lon);
+
+        if (location && location.name) {
+            return {
+                searchQuery: location.name,
+                displayName: location.fullName || location.name,
+                isDetailed: false // Simplificado - sem bairro
+            };
+        }
+
         return null;
     } catch (error) {
-        console.error('Erro no geocodificação reversa:', error);
+        console.error('Erro ao obter localização:', error);
         return null;
+    }
+}// Refinamento automático: tenta uma segunda leitura de alta precisão e atualiza apenas o rótulo (bairro/cidade)
+async function refineLocationIfNeeded(prevLat, prevLon, prevAccuracy) {
+    try {
+        if (!navigator.geolocation) return;
+        if (typeof prevAccuracy === 'number' && prevAccuracy <= 300) return; // mais rígido para refinar
+
+        const refineOptions = {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+        };
+
+        navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+                const { latitude, longitude, accuracy } = pos.coords;
+                const latDiff = Math.abs(latitude - prevLat);
+                const lonDiff = Math.abs(longitude - prevLon);
+                const improvedAccuracy = typeof accuracy === 'number' && (!prevAccuracy || (typeof prevAccuracy === 'number' && accuracy < (prevAccuracy - 100)));
+                const significantlyDifferent = latDiff > 0.0002 || lonDiff > 0.0002 || improvedAccuracy; // ~20-25m
+
+                if (!significantlyDifferent) return;
+
+                // Atualizar apenas a parte de localização (bairro/cidade) usando geocodificação reversa
+                const resolved = await reverseGeocode(latitude, longitude);
+                if (resolved && currentCityData) {
+                    applyLocationMetadata(currentCityData, resolved);
+                    currentCityData.name = resolved.displayShort || resolved.fullName || resolved.name || currentCityData.name;
+                    // Atualizar apenas a interface textual; não refetech de clima para evitar atraso
+                    displayWeather(currentCityData);
+                    if (DOM.cityInput) DOM.cityInput.value = currentCityData.name;
+                    console.log('📍 Local refinado automaticamente:', {
+                        accuracy,
+                        name: currentCityData.name
+                    });
+                }
+            },
+            (err) => {
+                console.warn('Refino de localização falhou:', err);
+            },
+            refineOptions
+        );
+    } catch (e) {
+        console.warn('Erro no refinamento de localização:', e);
     }
 }
 
-// Função para detectar localização precisa do usuário
-async function getDetailedLocation(lat, lon) {
-    try {
-        console.log('Detectando localização detalhada...');
-        
-        // Usar a função de geocodificação reversa melhorada
-        const location = await reverseGeocode(lat, lon);
-        
-        if (location) {
-            // Se temos bairro, usar bairro + cidade
-            if (location.neighborhood && location.city) {
-                return {
-                    searchQuery: location.city, // Para a API do clima
-                    displayName: `${location.neighborhood}, ${location.city}`,
-                    isDetailed: true
-                };
+// Watch curto para melhorar a precisão e atualizar apenas o rótulo (bairro/cidade)
+let accuracyWatchId = null;
+function startAccuracyWatch(initial) {
+    if (!navigator.geolocation) return;
+    // Evitar múltiplos watches
+    if (accuracyWatchId !== null) return;
+
+    const startTime = Date.now();
+    const timeoutMs = 15000; // até 15s para refinar
+    const minGain = 100; // precisa melhorar pelo menos 100m de precisão
+    const baseAccuracy = typeof initial.accuracy === 'number' ? initial.accuracy : 10000;
+
+    const options = {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: timeoutMs
+    };
+
+    accuracyWatchId = navigator.geolocation.watchPosition(async (pos) => {
+        try {
+            const { latitude, longitude, accuracy } = pos.coords;
+            const improved = typeof accuracy === 'number' && accuracy + minGain < baseAccuracy;
+            const stillTime = (Date.now() - startTime) < timeoutMs;
+            if (!improved && stillTime) return;
+
+            // Obter novo rótulo de localização com coordenadas mais precisas
+            const resolved = await reverseGeocode(latitude, longitude);
+            if (resolved && currentCityData) {
+                applyLocationMetadata(currentCityData, resolved);
+                currentCityData.name = resolved.displayShort || resolved.fullName || resolved.name || currentCityData.name;
+                displayWeather(currentCityData);
+                if (DOM.cityInput) DOM.cityInput.value = currentCityData.name;
+                console.log('📍 Watch: localização refinada', { accuracy, name: currentCityData.name });
             }
-            // Senão, usar apenas a cidade
-            return {
-                searchQuery: location.name,
-                displayName: location.fullName,
-                isDetailed: false
-            };
+        } catch (e) {
+            console.warn('Watch de precisão falhou:', e);
+        } finally {
+            // Encerrar o watch após um update útil ou timeout
+            stopAccuracyWatch();
         }
-        
-        return null;
-    } catch (error) {
-        console.error('Erro ao detectar localização detalhada:', error);
-        return null;
+    }, (err) => {
+        console.warn('watchPosition erro:', err);
+        stopAccuracyWatch();
+    }, options);
+}
+
+function stopAccuracyWatch() {
+    if (accuracyWatchId !== null) {
+        try { navigator.geolocation.clearWatch(accuracyWatchId); } catch { }
+        accuracyWatchId = null;
     }
 }
 
 // ========== EXIBIÇÃO DOS DADOS ==========
 function displayWeather(data) {
     if (!data || !data.main || !data.weather || !data.weather[0]) {
-        showErrorToast('Dados meteorológicos inválidos');
+        console.warn('Dados meteorológicos inválidos recebidos em displayWeather; suprimindo toast.');
         return;
     }
 
@@ -643,11 +896,21 @@ function displayWeather(data) {
     const unitSymbol = currentUnit === 'metric' ? '°C' : '°F';
 
     // Informações principais - priorizar nome da interface do clima
+    const isMobile = window.innerWidth <= 767;
     const cityName = data.name || 'Local desconhecido';
-    const cityDisplay = data.fullLocationName || cityName;
+
+    // Priorizar exibição de bairro + cidade quando disponível
+    let finalDisplay = cityName;
+
+    if (data.displayShort && data.displayShort !== cityName) {
+        finalDisplay = data.displayShort;
+        console.log('🏘️ Exibindo bairro + cidade:', finalDisplay);
+    } else {
+        console.log('�️ Exibindo cidade:', finalDisplay);
+    }
 
     // Atualizar elementos da tela principal
-    if (DOM.cityName) DOM.cityName.textContent = cityDisplay;
+    if (DOM.cityName) DOM.cityName.textContent = finalDisplay;
     if (DOM.mainTemp) {
         const tempValue = Math.round(data.main.temp) + unitSymbol;
         console.log('Atualizando temperatura principal:', tempValue);
@@ -725,15 +988,21 @@ function displayWeather(data) {
         if (DOM.sunInfo) DOM.sunInfo.textContent = '🌅 --:-- | 🌇 --:--';
     }
 
-    // Atualizar header com localização encurtada
-    const shortLocation = cityName.length > 20 ? cityName.substring(0, 17) + '...' : cityName;
-    updateHeaderInfo(shortLocation, Math.round(data.main.temp) + unitSymbol);
+    // Atualizar header - em mobile mostrar bairro+cidade completos
+    const headerLocation = isMobile ?
+        finalDisplay : // Mobile: mostra completo
+        (finalDisplay.length > 30 ? finalDisplay.split(',')[0] : finalDisplay); // Desktop: trunca se necessário
+
+    console.log('📱 Header location final (mobile=' + isMobile + '):', headerLocation);
+    updateHeaderInfo(headerLocation, Math.round(data.main.temp) + unitSymbol);
 
     // Verificar se é favorito
     updateFavoriteButton(cityName);
 
     // Mostrar dashboard e esconder tela de boas-vindas
     showWeatherDisplay();
+    // Fechar sidebar em mobile após render completo
+    handleMobileSearch();
 }
 
 // ========== FUNÇÕES DE INTERFACE ==========
@@ -836,17 +1105,13 @@ function displayForecast(data) {
 
 function updateHeaderInfo(location, temperature) {
     const unitSymbol = currentUnit === 'metric' ? '°C' : '°F';
-
-    // Encurtar nome da localização se muito longo para o header
-    let shortLocation = location;
-    if (location.length > 30) {
-        const parts = location.split(',');
-        shortLocation = parts[0]; // Usar apenas o nome da cidade
+    const isMobile = window.innerWidth <= 767;
+    let finalLocation = location;
+    if (!isMobile && location.length > 40) {
+        finalLocation = location.split(',')[0];
     }
-
-    DOM.headerLocation.textContent = shortLocation;
-    DOM.headerTemp.textContent = typeof temperature === 'number' ?
-        `${temperature}${unitSymbol}` : temperature;
+    DOM.headerLocation.textContent = finalLocation;
+    DOM.headerTemp.textContent = typeof temperature === 'number' ? `${temperature}${unitSymbol}` : temperature;
 }
 
 // ========== SISTEMA DE UNIDADES ==========
@@ -889,65 +1154,51 @@ function showSuggestions(query) {
     // Lista focada em cidades brasileiras principais
     const popularCities = [
         // Capitais brasileiras
-        'Rio de Janeiro', 'São Paulo', 'Brasília', 'Salvador', 'Fortaleza', 
+        'Rio de Janeiro', 'São Paulo', 'Brasília', 'Salvador', 'Fortaleza',
         'Belo Horizonte', 'Manaus', 'Curitiba', 'Recife', 'Porto Alegre',
-        'Goiânia', 'Belém', 'São Luís', 'Maceió', 'Campo Grande', 
+        'Goiânia', 'Belém', 'São Luís', 'Maceió', 'Campo Grande',
         'João Pessoa', 'Teresina', 'Aracaju', 'Cuiabá', 'Florianópolis',
         'Vitória', 'Natal', 'Porto Velho', 'Rio Branco', 'Macapá', 'Boa Vista',
-        
+
         // Região Metropolitana RJ
-        'Niterói', 'Nova Iguaçu', 'Duque de Caxias', 'São Gonçalo', 
+        'Niterói', 'Nova Iguaçu', 'Duque de Caxias', 'São Gonçalo',
         'Petrópolis', 'Cabo Frio', 'Campos dos Goytacazes', 'Volta Redonda',
-        
+
         // Região Metropolitana SP  
         'Guarulhos', 'Campinas', 'São Bernardo do Campo', 'Santo André',
         'Osasco', 'Sorocaba', 'Ribeirão Preto', 'Santos', 'Jundiaí',
-        
+
         // Outras cidades importantes
         'Uberlândia', 'Londrina', 'Joinville', 'Juiz de Fora', 'Contagem',
-        'Aparecida de Goiânia', 'Caxias do Sul', 'Feira de Santana',
-        
+        'Aparecida de Goiânia', 'Caxias do Sul', 'Feira de Santana', 'Chapeco',
+
         // Cidades internacionais principais
-        'Nova York', 'Londres', 'Paris', 'Tóquio', 'Pequim', 'Madrid', 
+        'Nova York', 'Londres', 'Paris', 'Tóquio', 'Pequim', 'Madrid',
         'Roma', 'Berlim', 'Buenos Aires', 'Toronto', 'Sydney'
     ];
 
-    // Priorizar cidades brasileiras, especialmente do RJ
+    // Priorizar resultados relevantes de forma genérica (sem viés regional)
     const queryLower = query.toLowerCase();
     let filteredCities = popularCities
         .filter(city => city.toLowerCase().includes(queryLower))
         .sort((a, b) => {
             const aLower = a.toLowerCase();
             const bLower = b.toLowerCase();
-            
-            // Prioridade 1: Cidades do Rio de Janeiro
-            const aIsRJ = aLower.includes('rio de janeiro');
-            const bIsRJ = bLower.includes('rio de janeiro');
-            if (aIsRJ && !bIsRJ) return -1;
-            if (!aIsRJ && bIsRJ) return 1;
-            
+
             // Prioridade 2: Correspondência exata no início
             const aStartsWith = aLower.startsWith(queryLower);
             const bStartsWith = bLower.startsWith(queryLower);
             if (aStartsWith && !bStartsWith) return -1;
             if (!aStartsWith && bStartsWith) return 1;
-            
+
             // Prioridade 3: Cidades brasileiras (sem vírgula = capital)
             const aIsBrazilian = !aLower.includes(',') || aLower.includes('brasil');
             const bIsBrazilian = !bLower.includes(',') || bLower.includes('brasil');
             if (aIsBrazilian && !bIsBrazilian) return -1;
             if (!aIsBrazilian && bIsBrazilian) return 1;
-            
+
             return 0;
         });
-
-    // Preferência específica: se usuário digita 'taquara' sugerir 'Taquara, Rio de Janeiro' antes de RS
-    if (queryLower === 'taquara') {
-        const taquaraRJ = 'Taquara, Rio de Janeiro';
-        if (!filteredCities.includes(taquaraRJ)) {
-            filteredCities.unshift(taquaraRJ);
-        }
-    }
 
     filteredCities = filteredCities.slice(0, 5);
 
@@ -969,11 +1220,8 @@ function hideSuggestions() {
     DOM.suggestions.innerHTML = '';
 }
 
-function selectCity(city) {
-    DOM.cityInput.value = city;
-    hideSuggestions();
-    searchWeather(city);
-}
+function selectCity(city) { DOM.cityInput.value = city; hideSuggestions(); searchWeather(city); handleMobileSearch(true); }
+function selectFavoriteCity(city) { DOM.cityInput.value = city; closeFavoritesModal(); searchWeather(city); handleMobileSearch(true); }
 
 // ========== SISTEMA DE FAVORITOS ==========
 function toggleFavoritesModal() {
@@ -1121,11 +1369,17 @@ function closeSidebar() {
     }
 }
 
-// Fechar sidebar automaticamente ao selecionar uma cidade em mobile
-function handleMobileSearch() {
-    if (window.innerWidth <= 1023) {
+// Fechar sidebar automaticamente ao selecionar uma cidade em mobile (versão aprimorada)
+function handleMobileSearch(force = false) {
+    const shouldClose = window.innerWidth <= 1200 || force; // ampliar threshold
+    if (!shouldClose) return;
+    // Usar microtask para garantir que DOM já atualizou
+    Promise.resolve().then(() => {
         closeSidebar();
-    }
+        if (DOM.sidebarOverlay) DOM.sidebarOverlay.classList.remove('show');
+        if (DOM.cityInput) DOM.cityInput.blur();
+        document.body.style.overflow = '';
+    });
 }
 
 // Ajustar layout quando a tela é redimensionada
@@ -1175,9 +1429,12 @@ function normalizeCityName(rawName, country, state) {
         if (!normalized.includes(countryName)) {
             normalized += ` - ${countryName}`;
         }
-    } else if (state && country === 'BR' && !normalized.includes(state)) {
+    } else if (country === 'BR') {
+        if (state && !normalized.includes(state)) {
+            normalized += `, ${state}`;
+        }
+        // Nunca acrescentar sufixos confusos no Brasil
         // Para o Brasil, adicionar estado apenas se não estiver presente
-        normalized += `, ${state}`;
     }
 
     return normalized;
@@ -1229,7 +1486,7 @@ function getWeatherEmoji(weatherMain, timezone = 0, sunrise = null, sunset = nul
         },
         'Snow': { // Neve
             day: '❄️',
-            night: '🌨️'            
+            night: '🌨️'
         },
         'Mist': { // Névoa
             day: '🌫️',

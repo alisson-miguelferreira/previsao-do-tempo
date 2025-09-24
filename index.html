@@ -17,199 +17,200 @@
     <div class="background-particles"></div>
 
     <div class="app-wrapper">
-        <!-- Container Central -->
+        <!-- Botão Hamburguer Global (mobile) -->
+        <button class="sidebar-toggle" id="sidebarToggle" aria-label="Abrir menu">
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+        </button>
+
         <!-- Sidebar -->
-            <aside class="sidebar">
-                <div class="sidebar-content">
-                    <!-- Brand -->
-                    <div class="sidebar-brand">
-                        <div class="brand-icon">🌤️</div>
-                        <div class="brand-text">
-                            <h1 class="brand-title">TempNow</h1>
-                            <p class="brand-subtitle">Previsão Inteligente</p>
-                        </div>
+        <aside class="sidebar">
+            <div class="sidebar-content">
+                <!-- Brand -->
+                <div class="sidebar-brand">
+                    <div class="brand-icon">🌤️</div>
+                    <div class="brand-text">
+                        <h1 class="brand-title">TempNow</h1>
+                        <p class="brand-subtitle">Previsão Inteligente</p>
                     </div>
-
-                    <!-- Menu de Busca -->
-                    <section class="sidebar-section">
-                        <h3 class="section-label">
-                            <span class="section-icon">🔍</span>
-                            Buscar Localização
-                        </h3>
-                        <div class="search-container">
-                            <div class="search-input-group">
-                                <input type="text" id="cityInput" class="search-input"
-                                    placeholder="Digite o nome de uma cidade..." autocomplete="off">
-                                <div class="search-suggestions" id="suggestions"></div>
-                            </div>
-                            <div class="search-actions">
-                                <button id="searchBtn" class="search-btn primary" title="Buscar">
-                                    <span class="btn-icon">🔍</span>
-                                    <span class="btn-text">Buscar</span>
-                                </button>
-                                <button id="locationBtn" class="search-btn secondary" title="Usar localização atual">
-                                    <span class="btn-icon">📍</span>
-                                    <span class="btn-text">Localização</span>
-                                </button>
-                            </div>
-                        </div>
-                    </section>
-
-                    <!-- Menu de Favoritos -->
-                    <section class="sidebar-section">
-                        <h3 class="section-label">
-                            <span class="section-icon">⭐</span>
-                            Cidades Favoritas
-                        </h3>
-                        <div class="favorites-container">
-                            <div id="sidebarFavoritesList" class="sidebar-favorites-list"></div>
-                            <div class="favorites-actions">
-                                <button class="favorites-btn" id="openFavoritesModal" title="Gerenciar favoritos">
-                                    <span class="btn-icon">⚙️</span>
-                                    <span class="btn-text">Gerenciar Favoritos</span>
-                                </button>
-                            </div>
-                        </div>
-                    </section>
-
-                    <!-- Configurações -->
-                    <section class="sidebar-section">
-                        <h3 class="section-label">
-                            <span class="section-icon">⚙️</span>
-                            Configurações
-                        </h3>
-                        <div class="settings-container">
-                            <div class="unit-selector">
-                                <span class="unit-label">Unidade de Temperatura:</span>
-                                <div class="unit-toggle" id="unitToggle" data-unit="metric">
-                                    <span class="unit-option active" data-unit="metric">°C</span>
-                                    <span class="unit-option" data-unit="imperial">°F</span>
-                                    <div class="unit-slider"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
                 </div>
-            </aside>
 
-            <!-- Container Principal -->
-            <main class="main-container">
-                <!-- Toggle da Sidebar para Mobile -->
-                <button class="sidebar-toggle" id="sidebarToggle" aria-label="Abrir menu">
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                </button>
-
-                <!-- Header com informações atuais -->
-                <header class="weather-header">
-                    <div class="current-weather-summary">
-                        <div class="current-temp" id="headerTemp">--°</div>
-                        <div class="current-location" id="headerLocation">Selecione uma cidade</div>
-                        <div class="header-actions">
-                            <button class="refresh-btn" id="refreshBtn" title="Atualizar">
-                                <span class="btn-icon">🔄</span>
+                <!-- Menu de Busca -->
+                <section class="sidebar-section">
+                    <h3 class="section-label">
+                        <span class="section-icon">🔍</span>
+                        Buscar Localização
+                    </h3>
+                    <div class="search-container">
+                        <div class="search-input-group">
+                            <input type="text" id="cityInput" class="search-input"
+                                placeholder="Digite o nome de uma cidade..." autocomplete="off">
+                            <div class="search-suggestions" id="suggestions"></div>
+                        </div>
+                        <div class="search-actions">
+                            <button id="searchBtn" class="search-btn primary" title="Buscar cidade">
+                                <span class="btn-icon">🔍</span>
+                                <span class="btn-text">Buscar</span>
                             </button>
-                            <button class="favorite-btn" id="addFavorite" title="Adicionar aos favoritos">
-                                <span class="btn-icon">⭐</span>
+                            <button id="locationBtn" class="search-btn secondary"
+                                title="Usar localização atual (bairro + cidade)">
+                                <span class="btn-icon">📍</span>
+                                <span class="btn-text">Localização Atual</span>
                             </button>
-                        </div>
-                    </div>
-                </header>
-
-                <!-- Previsão Atual -->
-                <section class="current-weather">
-                    <div class="weather-main">
-                        <div class="temperature-display">
-                            <span class="main-temp" id="mainTemp">--°</span>
-                            <span class="temp-unit">C</span>
-                        </div>
-                        <div class="weather-info">
-                            <h2 class="city-name" id="cityName">Selecione uma cidade</h2>
-                            <p class="coordinates" id="coordinates">--°, --°</p>
-                            <p class="weather-description" id="weatherDescription">Carregando...</p>
-                            <div class="weather-details">
-                                <span class="feels-like">Sensação térmica: <span id="feelsLike">--°</span></span>
-                                <span class="humidity">Umidade: <span id="humidity">--%</span></span>
-                                <span class="wind">Vento: <span id="windSpeed">-- km/h</span></span>
-                                <span class="pressure">Pressão: <span id="pressure">-- hPa</span></span>
-                                <span class="visibility">Visibilidade: <span id="visibility">-- km</span></span>
-                            </div>
-                            <div class="sun-info" id="sunInfo">🌅 --:-- | 🌇 --:--</div>
-                            <div class="last-update">Atualizado às: <span id="lastUpdate">--:--</span></div>
-                        </div>
-                        <div class="weather-icon">
-                            <span id="weatherIcon">🌤️</span>
                         </div>
                     </div>
                 </section>
 
-                <!-- Previsão 5 Dias -->
-                <section class="forecast-section">
-                    <h3>Previsão para os próximos 5 dias</h3>
-                    <div class="forecast-container" id="forecastContainer">
-                        <!-- Cards de previsão serão inseridos aqui pelo JavaScript -->
+                <!-- Menu de Favoritos -->
+                <section class="sidebar-section">
+                    <h3 class="section-label">
+                        <span class="section-icon">⭐</span>
+                        Cidades Favoritas
+                    </h3>
+                    <div class="favorites-container">
+                        <div id="sidebarFavoritesList" class="sidebar-favorites-list"></div>
+                        <div class="favorites-actions">
+                            <button class="favorites-btn" id="openFavoritesModal" title="Gerenciar favoritos">
+                                <span class="btn-icon">⚙️</span>
+                                <span class="btn-text">Gerenciar Favoritos</span>
+                            </button>
+                        </div>
                     </div>
                 </section>
-            </main>
 
-            <!-- Painel de Favoritos (Modal) -->
-            <div class="favorites-modal hidden" id="favoritesModal">
-                <div class="modal-backdrop" id="favoritesBackdrop"></div>
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>Cidades Favoritas</h3>
-                        <button class="close-btn" id="closeFavorites">×</button>
+                <!-- Configurações -->
+                <section class="sidebar-section">
+                    <h3 class="section-label">
+                        <span class="section-icon">⚙️</span>
+                        Configurações
+                    </h3>
+                    <div class="settings-container">
+                        <div class="unit-selector">
+                            <span class="unit-label">Unidade de Temperatura:</span>
+                            <div class="unit-toggle" id="unitToggle" data-unit="metric">
+                                <span class="unit-option active" data-unit="metric">°C</span>
+                                <span class="unit-option" data-unit="imperial">°F</span>
+                                <div class="unit-slider"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="modal-body">
-                        <div id="favoritesList" class="favorites-grid"></div>
-                        <button class="clear-favorites-btn" id="clearFavorites">Limpar Todos</button>
+                </section>
+            </div>
+        </aside>
+
+        <!-- Container Principal -->
+        <main class="main-container hidden" id="weatherDisplay">
+
+            <!-- Header com informações atuais -->
+            <header class="weather-header">
+                <div class="current-weather-summary">
+                    <div class="current-temp" id="headerTemp">--°</div>
+                    <div class="current-location" id="headerLocation">Selecione uma cidade</div>
+                    <div class="header-actions">
+                        <button class="refresh-btn" id="refreshBtn" title="Atualizar">
+                            <span class="btn-icon">🔄</span>
+                        </button>
+                        <button class="favorite-btn" id="addFavorite" title="Adicionar aos favoritos">
+                            <span class="btn-icon">⭐</span>
+                        </button>
                     </div>
                 </div>
-            </div>
+            </header>
 
-            <!-- Tela de Boas-vindas -->
-            <div class="welcome-screen" id="welcomeScreen">
-                <div class="welcome-hero">
-                    <div class="hero-animation">
-                        <div class="floating-icon">🌤️</div>
-                        <div class="weather-elements">
-                            <span class="element sun">☀️</span>
-                            <span class="element cloud">☁️</span>
-                            <span class="element rain">🌧️</span>
-                        </div>
+            <!-- Previsão Atual -->
+            <section class="current-weather">
+                <div class="weather-main">
+                    <div class="temperature-display">
+                        <span class="main-temp" id="mainTemp">--°</span>
+                        <span class="temp-unit">C</span>
                     </div>
-
-                    <h2 class="welcome-title">Bem-vindo ao TempNow</h2>
-                    <p class="welcome-subtitle">
-                        Previsões meteorológicas precisas com design moderno e interface intuitiva
-                    </p>
-
-                    <div class="features-showcase">
-                        <div class="feature-item">
-                            <span class="feature-icon">🎯</span>
-                            <span class="feature-text">Precisão de 99%</span>
+                    <div class="weather-info">
+                        <h2 class="city-name" id="cityName">Selecione uma cidade</h2>
+                        <p class="coordinates" id="coordinates">--°, --°</p>
+                        <p class="weather-description" id="weatherDescription">Carregando...</p>
+                        <div class="weather-details">
+                            <span class="feels-like">Sensação térmica: <span id="feelsLike">--°</span></span>
+                            <span class="humidity">Umidade: <span id="humidity">--%</span></span>
+                            <span class="wind">Vento: <span id="windSpeed">-- km/h</span></span>
+                            <span class="pressure">Pressão: <span id="pressure">-- hPa</span></span>
+                            <span class="visibility">Visibilidade: <span id="visibility">-- km</span></span>
                         </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">⚡</span>
-                            <span class="feature-text">Carregamento rápido</span>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🌍</span>
-                            <span class="feature-text">200+ países</span>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">📱</span>
-                            <span class="feature-text">Design responsivo</span>
-                        </div>
+                        <div class="sun-info" id="sunInfo">🌅 --:-- | 🌇 --:--</div>
+                        <div class="last-update">Atualizado às: <span id="lastUpdate">--:--</span></div>
                     </div>
-
-                    <div class="welcome-cta">
-                        <p>Comece digitando o nome de uma cidade acima</p>
-                        <div class="cta-arrow">↑</div>
+                    <div class="weather-icon">
+                        <span id="weatherIcon">🌤️</span>
                     </div>
                 </div>
+            </section>
+
+            <!-- Previsão 5 Dias -->
+            <section class="forecast-section">
+                <h3>Previsão para os próximos 5 dias</h3>
+                <div class="forecast-container" id="forecastContainer">
+                    <!-- Cards de previsão serão inseridos aqui pelo JavaScript -->
+                </div>
+            </section>
+        </main>
+
+        <!-- Painel de Favoritos (Modal) -->
+        <div class="favorites-modal hidden" id="favoritesModal">
+            <div class="modal-backdrop" id="favoritesBackdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Cidades Favoritas</h3>
+                    <button class="close-btn" id="closeFavorites">×</button>
+                </div>
+                <div class="modal-body">
+                    <div id="favoritesList" class="favorites-grid"></div>
+                    <button class="clear-favorites-btn" id="clearFavorites">Limpar Todos</button>
+                </div>
             </div>
+        </div>
+
+        <!-- Tela de Boas-vindas -->
+        <div class="welcome-screen" id="welcomeScreen">
+            <div class="welcome-hero">
+                <div class="hero-animation">
+                    <div class="floating-icon">🌤️</div>
+                    <div class="weather-elements">
+                        <span class="element sun">☀️</span>
+                        <span class="element cloud">☁️</span>
+                        <span class="element rain">🌧️</span>
+                    </div>
+                </div>
+
+                <h2 class="welcome-title">Bem-vindo ao TempNow</h2>
+                <p class="welcome-subtitle">
+                    Previsões meteorológicas precisas com design moderno e interface intuitiva
+                </p>
+
+                <div class="features-showcase">
+                    <div class="feature-item">
+                        <span class="feature-icon">🎯</span>
+                        <span class="feature-text">Precisão de 99%</span>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">⚡</span>
+                        <span class="feature-text">Carregamento rápido</span>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">🌍</span>
+                        <span class="feature-text">200+ países</span>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">📱</span>
+                        <span class="feature-text">Design responsivo</span>
+                    </div>
+                </div>
+
+                <div class="welcome-cta">
+                    <p>Comece digitando o nome de uma cidade acima</p>
+                    <div class="cta-arrow">↑</div>
+                </div>
+            </div>
+        </div>
 
         </main>
 
