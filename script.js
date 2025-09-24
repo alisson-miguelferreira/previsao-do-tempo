@@ -1158,8 +1158,8 @@ function getWeatherEmoji(weatherMain, timezone = 0, sunrise = null, sunset = nul
             night: '☁️'
         },
         'Rain': {
-            day: '�️',
-            night: '�🌧️'
+            day: '🌧️',
+            night: '🌧️'
         },
         'Drizzle': {
             day: '🌦️',
