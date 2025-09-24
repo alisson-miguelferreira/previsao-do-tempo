@@ -139,40 +139,7 @@ function setupEventListeners() {
 }
 
 // ========== FUNÇÕES DE CONTROLE DE TELA ==========
-function showWelcomeScreen() {
-    DOM.welcomeScreen.classList.remove('hidden');
-    DOM.weatherDisplay.classList.add('hidden');
-}
-
-function hideWelcomeScreen() {
-    DOM.welcomeScreen.classList.add('hidden');
-    DOM.weatherDisplay.classList.remove('hidden');
-}
-
-function showLoading() {
-    DOM.loadingOverlay.classList.remove('hidden');
-}
-
-function hideLoading() {
-    DOM.loadingOverlay.classList.add('hidden');
-}
-
-function showErrorToast(message) {
-    const toastMessage = DOM.errorToast.querySelector('.toast-message');
-    if (toastMessage) {
-        toastMessage.textContent = message;
-    }
-    DOM.errorToast.classList.remove('hidden');
-
-    // Ocultar automaticamente após 5 segundos
-    setTimeout(() => {
-        hideErrorToast();
-    }, 5000);
-}
-
-function hideErrorToast() {
-    DOM.errorToast.classList.add('hidden');
-}
+// (Mantido apenas um bloco destas funções mais abaixo para evitar duplicação)
 
 // ========== FUNÇÕES DE PESQUISA ==========
 function handleSearch() {
@@ -579,6 +546,44 @@ async function reverseGeocode(lat, lon) {
             }
         }
 
+        // API 3: BigDataCloud Reverse Geocode (bairro detalhado) - sem chave para nível básico
+        if (!bestResult) {
+            try {
+                console.log('Tentando BigDataCloud Geocoding...');
+                const bdcUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${roundedLat}&longitude=${roundedLon}&localityLanguage=pt`;
+                const bdcResponse = await fetch(bdcUrl);
+                if (bdcResponse.ok) {
+                    const bdcData = await bdcResponse.json();
+                    console.log('📍 BigDataCloud encontrou:', bdcData);
+                    if (bdcData && (bdcData.city || bdcData.locality)) {
+                        const neighborhood = bdcData.locality || bdcData.localityInfo?.administrative?.find(a => a.adminLevel === 10)?.name || '';
+                        const cityName = bdcData.city || bdcData.locality || bdcData.principalSubdivision || '';
+                        const state = bdcData.principalSubdivision || '';
+                        const parts = [];
+                        if (neighborhood && neighborhood.toLowerCase() !== cityName.toLowerCase()) parts.push(neighborhood);
+                        if (cityName) parts.push(cityName);
+                        if (state && !parts.includes(state)) parts.push(state);
+                        const fullName = parts.join(', ');
+                        bestResult = {
+                            name: cityName || neighborhood || fullName,
+                            fullName,
+                            neighborhood: neighborhood || '',
+                            city: cityName || '',
+                            state: state || '',
+                            country: bdcData.countryCode || '',
+                            coordinates: { lat: roundedLat, lon: roundedLon },
+                            source: 'BigDataCloud'
+                        };
+                    }
+                }
+            } catch (error) {
+                console.warn('Erro no BigDataCloud:', error);
+            }
+        }
+
+        if (bestResult) {
+            return bestResult;
+        }
         console.warn('Nenhuma localização válida encontrada em nenhuma API');
         return null;
     } catch (error) {
@@ -732,45 +737,7 @@ function displayWeather(data) {
 }
 
 // ========== FUNÇÕES DE INTERFACE ==========
-function showWelcomeScreen() {
-    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.remove('hidden');
-    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.add('hidden');
-}
-
-function showWeatherDisplay() {
-    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.add('hidden');
-    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.remove('hidden');
-}
-
-function updateHeaderInfo(location, temperature) {
-    if (DOM.headerLocation) DOM.headerLocation.textContent = location;
-    if (DOM.headerTemp) DOM.headerTemp.textContent = temperature;
-}
-
-function showLoading() {
-    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.remove('hidden');
-}
-
-function hideLoading() {
-    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.add('hidden');
-}
-
-function showErrorToast(message) {
-    if (DOM.errorToast) {
-        const messageEl = DOM.errorToast.querySelector('.toast-message');
-        if (messageEl) messageEl.textContent = message;
-        DOM.errorToast.classList.remove('hidden');
-
-        // Ocultar automaticamente após 5 segundos
-        setTimeout(() => {
-            hideErrorToast();
-        }, 5000);
-    }
-}
-
-function hideErrorToast() {
-    if (DOM.errorToast) DOM.errorToast.classList.add('hidden');
-}
+// (Removidas duplicatas de funções de interface)
 
 function displayForecast(data) {
     if (!data || !data.list || !Array.isArray(data.list)) {
@@ -947,7 +914,7 @@ function showSuggestions(query) {
 
     // Priorizar cidades brasileiras, especialmente do RJ
     const queryLower = query.toLowerCase();
-    const filteredCities = popularCities
+    let filteredCities = popularCities
         .filter(city => city.toLowerCase().includes(queryLower))
         .sort((a, b) => {
             const aLower = a.toLowerCase();
@@ -972,8 +939,17 @@ function showSuggestions(query) {
             if (!aIsBrazilian && bIsBrazilian) return 1;
             
             return 0;
-        })
-        .slice(0, 5);
+        });
+
+    // Preferência específica: se usuário digita 'taquara' sugerir 'Taquara, Rio de Janeiro' antes de RS
+    if (queryLower === 'taquara') {
+        const taquaraRJ = 'Taquara, Rio de Janeiro';
+        if (!filteredCities.includes(taquaraRJ)) {
+            filteredCities.unshift(taquaraRJ);
+        }
+    }
+
+    filteredCities = filteredCities.slice(0, 5);
 
     if (filteredCities.length > 0) {
         let html = '';
@@ -1098,45 +1074,7 @@ function clearAllFavorites() {
 }
 
 // ========== FUNÇÕES DE INTERFACE ==========
-function showWelcomeScreen() {
-    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.remove('hidden');
-    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.add('hidden');
-}
-
-function showWeatherDisplay() {
-    if (DOM.welcomeScreen) DOM.welcomeScreen.classList.add('hidden');
-    if (DOM.weatherDisplay) DOM.weatherDisplay.classList.remove('hidden');
-}
-
-function updateHeaderInfo(location, temperature) {
-    if (DOM.headerLocation) DOM.headerLocation.textContent = location;
-    if (DOM.headerTemp) DOM.headerTemp.textContent = temperature;
-}
-
-function showLoading() {
-    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.remove('hidden');
-}
-
-function hideLoading() {
-    if (DOM.loadingOverlay) DOM.loadingOverlay.classList.add('hidden');
-}
-
-function showErrorToast(message) {
-    if (DOM.errorToast) {
-        const messageEl = DOM.errorToast.querySelector('.toast-message');
-        if (messageEl) messageEl.textContent = message;
-        DOM.errorToast.classList.remove('hidden');
-
-        // Ocultar automaticamente após 5 segundos
-        setTimeout(() => {
-            hideErrorToast();
-        }, 5000);
-    }
-}
-
-function hideErrorToast() {
-    if (DOM.errorToast) DOM.errorToast.classList.add('hidden');
-}
+// (Removidas duplicatas adicionais)
 
 function updateFavoriteButton(cityName) {
     if (!DOM.addFavorite || !cityName) return;

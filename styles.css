@@ -2483,16 +2483,16 @@ body {
 }
 
 .sidebar-toggle.active .hamburger-line:nth-child(1) {
-    transform: rotate(45deg) translate(3px, 3px);
+    transform: translateY(6px) rotate(45deg);
 }
 
 .sidebar-toggle.active .hamburger-line:nth-child(2) {
     opacity: 0;
-    transform: scale(0);
+    transform: scaleX(0);
 }
 
 .sidebar-toggle.active .hamburger-line:nth-child(3) {
-    transform: rotate(-45deg) translate(3px, -3px);
+    transform: translateY(-6px) rotate(-45deg);
 }
 
 /* Overlay para sidebar mobile */
