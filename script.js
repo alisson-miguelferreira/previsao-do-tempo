@@ -219,7 +219,7 @@ async function searchWeather(city) {
     const weatherData = await fetchWeatherData(city, { context: 'search' });
     currentCityData = weatherData;
     displayWeather(weatherData);
-    hideWelcomeScreen();
+    showWeatherDisplay();
     hideErrorToast();
 
     // Buscar previsão depois, sem derrubar a tela caso falhe
@@ -389,7 +389,7 @@ async function getCurrentLocation() {
           displayForecast(forecastData);
         }
 
-        hideWelcomeScreen();
+        showWeatherDisplay();
         hideLoading();
         hideErrorToast();
 
