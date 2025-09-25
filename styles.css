@@ -411,7 +411,7 @@ body {
 
 .search-btn.primary {
     background: var(--gradient-accent);
-    color: var(--primary-bg);
+    color: var(--accent-light);
     box-shadow: 0 6px 20px var(--shadow-glow);
 }
 
